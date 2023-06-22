@@ -1,0 +1,45 @@
+---
+title: "cycle_infra"
+output: html_document
+date: "2023-06-11"
+---
+
+This section will collect and organise the cycle infrastructure data, more specifically the cycle parking data in London. It will start from using a sample of London's data - data in Camden borough to test and map the location of parking space and the amount of it per location. 
+
+```{r}
+library(devtools)
+devtools::install_github("PublicHealthDataGeek/CycleInfraLnd")
+
+```
+
+```{r}
+library(dplyr)
+library(tmap)
+library(sf)
+```
+
+
+```{r}
+library(CycleInfraLnd)
+?get_cid_points
+
+cid_parking = get_cid_points(type = "cycle_parking")
+```
+
+
+```{r}
+London_borough <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
+    st_transform(., 4326)
+
+camden = London_borough %>% 
+  filter(name == "Camden")
+
+cid_parking_cam = cid_parking[camden, , op = sf::st_within]
+
+tmap_mode("plot")
+tm_shape(cid_parking_cam) +
+  tm_dots(col="PRK_CPT",palette="RdYlBu")+
+tm_shape(camden)+
+  tm_polygons(col=NA,alpha=0)
+```
+
