@@ -4,13 +4,16 @@ output: html_document
 date: "2023-06-11"
 ---
 
-This section will collect and organise the cycle infrastructure data, more specifically the cycle parking data in London. It will start from using a sample of London's data - data in Camden borough to test and map the location of parking space and the amount of it per location. 
+This section aims to get an understanding of the cycle infrastructure database (CID) by TfL, more specifically the cycle parking AND cycle lanes/tracks data in London. It will start from using a sample of London's data - data in Camden borough to test and map the location of those cycling infrastructure and their attributes (e.g. capacity of cycle parking space). 
+
+The CID data is in the form of R package, so this will be installed first. 
 
 ```{r}
-library(devtools)
-devtools::install_github("PublicHealthDataGeek/CycleInfraLnd")
-
+#library(devtools)
+#devtools::install_github("PublicHealthDataGeek/CycleInfraLnd")
 ```
+
+# Load packages
 
 ```{r}
 library(dplyr)
@@ -18,14 +21,46 @@ library(tmap)
 library(sf)
 ```
 
-
 ```{r}
 library(CycleInfraLnd)
-?get_cid_points
 
+# CID has either point or line data. 
+
+?get_cid_points
+?get_cid_lines
+```
+
+# Read in data from CID 
+
+For point data, there are five types of infra - 
+
+1) Signals - early-release signals at junctions
+2) Cycle parking, including the type and capacity of parking   
+3) Restricted Points – points where people cycling will have to dismount Paths through parks and other green spaces that can, and cannot, be cycled on
+4) Signage - Signed cycle routes and other wayfinding
+5) Traffic calming, including the location of all speed humps in Greater London
+
+For this project, only cycle parking is in need. 
+
+```{r}
 cid_parking = get_cid_points(type = "cycle_parking")
 ```
 
+For point data, there are five types of infra - 
+
+1) Advanced stop lines – boxes at junctions for people cycling
+2) Signalised crossings for cycles
+3) Cycle lanes and tracks – including whether they are segregated or painted lanes
+4) Restricted route - Modal filters and traffic gates which allow cycles to pass but restrict car traffic
+
+For this project, Cycle lanes and tracks and Restricted route can be read in. 
+
+```{r}
+cycle_lane = get_cid_lines(type = "cycle_lane_track")
+cycle_restricted = get_cid_lines(type = "restricted_route")
+```
+
+# Read in camden boundary
 
 ```{r}
 London_borough <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
@@ -33,13 +68,63 @@ London_borough <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
 
 camden = London_borough %>% 
   filter(name == "Camden")
+```
 
+# spatial subsetting to reduce data for mapping 
+
+```{r}
 cid_parking_cam = cid_parking[camden, , op = sf::st_within]
+cycle_lane_cam = cycle_lane[camden, , op = sf::st_within]
+cycle_restricted_cam = cycle_restricted[camden, , op = sf::st_within]
+```
 
+# map the infrastructure 
+
+```{r}
 tmap_mode("plot")
 tm_shape(cid_parking_cam) +
   tm_dots(col="PRK_CPT",palette="RdYlBu")+
 tm_shape(camden)+
   tm_polygons(col=NA,alpha=0)
+  
+tm_shape(cycle_lane_cam) +
+  tm_lines(col="CLT_SEGREG",palette = "RdYlBu")+
+tm_shape(camden)+
+  tm_polygons(col=NA,alpha=0)
+
+tmap_mode("plot")
+tm_shape(cycle_lane_cam) +
+  tm_lines(col="blue")+
+tm_shape(cycle_restricted_cam) +
+  tm_lines(col="black")+
+tm_shape(camden)+
+  tm_polygons(col=NA,alpha=0)
 ```
+
+# compare the cycle tracks/lanes with OSM network data
+
+```{r}
+# Indicate the path where OSM and GTFS data are stored
+r5r_core <- setup_r5(data_path = "C:/Users/99/Documents/CASA/dissertation_test/input")
+```
+
+```{r}
+street_net <- street_network_to_sf(r5r_core)
+street_net_l <- street_net$edges
+street_net_cam = street_net_l[camden, , op = sf::st_within]
+```
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(street_net_cam) +
+  tm_lines(col="grey")+
+tm_shape(cycle_lane_cam) +
+  tm_lines(col="blue")+
+tm_shape(cycle_restricted_cam) +
+  tm_lines(col="black")+
+tm_shape(camden)+
+  tm_polygons(col=NA,alpha=0)
+```
+
 
