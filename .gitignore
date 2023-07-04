@@ -162,7 +162,7 @@ cython_debug/
 
 
 
-/data*
+/data/*
 /input*
 /gtfs_london*
 
