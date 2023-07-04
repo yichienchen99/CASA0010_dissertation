@@ -40,6 +40,7 @@ The data input folder contains:
 2. OSM network pbf (downloaded from https://download.geofabrik.de/ on 5 June 2023)
 
 3. London GTFS zip (this data is sourced from https://www.travelinedata.org.uk/traveline-open-data/traveline-national-dataset/ ion 12 June 2023, following the instruction in https://citygeographics.org/r5r-workshop/uk-transit-data-transxchange-and-atoc/)
+> this data is not used in the estimation (due to 1- it has missing components after validation, 2- it is also rational that cycle accessibility omits public transport frequency, although reducing the similarity with PTAL method.) 
 
 4. elevation tif (processed in the additional_data_processing.Rmd)
 
@@ -144,12 +145,12 @@ max_bike_time <- 12 # minutes
 max_trip_duration <- 60 # minutes
 
 # departure datetime (peak time)
-departure_datetime = as.POSIXct("24-04-2023 08:00:00", 
+departure_datetime = as.POSIXct("24-04-2021 08:00:00", 
                                 format = "%d-%m-%Y %H:%M:%S",
                                 tz = "GMT")
 
 # departure datetime (off-peak time)
-departure_datetime_off = as.POSIXct("23-04-2023 11:00:00", 
+departure_datetime_off = as.POSIXct("23-04-2021 11:00:00", 
                                 format = "%d-%m-%Y %H:%M:%S",
                                 tz = "GMT")
 ```
@@ -170,20 +171,19 @@ destin_cam_sf_stati$id <- destin_cam_sf_stati$id%>%
   as.character(.)
 ```
 
-Estimate the travel time by walking and transit. 
+Estimate the travel time by walking. 
 
 ```{r}
 # estimate travel time matrix for walk
-ttm_walk <- expanded_travel_time_matrix(r5r_core = r5r_core,   
+ttm_walk <- travel_time_matrix(r5r_core = r5r_core,   
                           origins = origin_cam_sf,
                           destinations = destin_cam_sf,    
-                          mode = c("WALK","TRANSIT"),
+                          mode = c("WALK"),
                           max_walk_time = max_walk_time,
                           max_trip_duration = max_trip_duration,
                           walk_speed = 4.8,
                           bike_speed = 13,
-                          departure_datetime = departure_datetime,
-                          breakdown = TRUE)
+                          departure_datetime = departure_datetime)
 
 head(ttm_walk, n = 10)
 ```
@@ -197,16 +197,15 @@ destin_cam_sf_bike <- destin_cam_sf %>%
 
 ```{r}
 # estimate travel time matrix for bike
-ttm_bike <- expanded_travel_time_matrix(r5r_core = r5r_core,   
+ttm_bike <- travel_time_matrix(r5r_core = r5r_core,   
                           origins = origin_cam_sf,
                           destinations = destin_cam_sf_bike,    
-                          mode = c("BICYCLE","TRANSIT"),
+                          mode = c("BICYCLE"),
                           max_bike_time = max_bike_time,
                           max_trip_duration = max_trip_duration,
                           walk_speed = 4.8,
                           bike_speed = 13,
-                          departure_datetime = departure_datetime,
-                          breakdown = TRUE)
+                          departure_datetime = departure_datetime)
 
 head(ttm_bike, n = 10)
 ```
@@ -217,19 +216,17 @@ head(ttm_bike, n = 10)
 > option 2: drop public transport mode / long distance travel since the focus is on local connectivity
 > option 3: sort out how to incorporate GTFS for London correctly. (but this was tried already with different feeds..)
 
-Assuming there is waiting time and GTFS issue is solved - 
+Assuming option 1 - 
 
 
 ```{r}
 ttm_walk <-ttm_walk %>%
-  rename(walk_time = access_time)%>%
-  rename(wait_time_walk = wait_time)%>%
-  select("from_id","to_id","walk_time","wait_time_walk","routes")
+  rename(walk_time = travel_time_p50)%>%
+  select("from_id","to_id","walk_time")
 
 ttm_bike <-ttm_bike %>%
-  rename(bike_time = access_time)%>%
-  rename(wait_time_bike = wait_time)%>%
-  select("from_id","to_id","bike_time","wait_time_bike","routes")
+  rename(bike_time = travel_time_p50)%>%
+  select("from_id","to_id","bike_time")
 ```
 
 # WP2: parking time estimates
@@ -427,18 +424,18 @@ ttm_all <- full_join(ttm_walk,ttm_bike_park,by=c("from_id","to_id"))
 
 ```{r}
 ttm_all_test <- ttm_all %>%
-  mutate (access_time = case_when (!is.na(walk_time) ~ walk_time + wait_time_walk,
-                           !is.na(bike_time) ~ bike_time + wait_time_bike + park_time,
-                           TRUE ~ walk_time + wait_time_walk))
+  mutate (access_time = case_when (!is.na(walk_time) ~ walk_time,
+                           !is.na(bike_time) ~ bike_time + park_time,
+                           TRUE ~ walk_time))
 ```
 
 This is to compare the data with and without parking time estimates and how this influence CAL. 
 
 ```{r}
 ttm_all_test2 <- ttm_all %>%
-  mutate (access_time = case_when (!is.na(walk_time) ~ walk_time + wait_time_walk,
-                           !is.na(bike_time) ~ bike_time + wait_time_bike,
-                           TRUE ~ walk_time + wait_time_walk))
+  mutate (access_time = case_when (!is.na(walk_time) ~ walk_time,
+                           !is.na(bike_time) ~ bike_time,
+                           TRUE ~ walk_time))
 ```
 
 Note: there is no gtfs data imported now, so the waiting time is unknown. 
