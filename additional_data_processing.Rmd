@@ -31,12 +31,7 @@ library(osmextract)
 
 ## GTFS 
 
-London GTFS downloaded from: https://www.transit.land/feeds/f-dpwh-londontransit
-Download date: June 5, 2023
-
-Still not working. 
-
-Then another gtfs source is used. It is in the format of TransXchange data, downloaded from the website: https://www.travelinedata.org.uk/traveline-open-data/traveline-national-dataset/. This website requires the open source software like Filezilla or Core FTP to download the remote TransXchange data zip files to the local directory. 
+London GTFS is in the format of TransXchange data, downloaded from the website: https://www.travelinedata.org.uk/traveline-open-data/traveline-national-dataset/. This website requires the open source software like Filezilla or Core FTP to download the remote TransXchange data zip files to the local directory. (download date: 06 July 2023)
 
 Then the TransXchange data will be converted to gtfs format using UK2GTFS r package. 
 
@@ -49,17 +44,26 @@ remotes::install_github("ITSleeds/UK2GTFS")
 library(UK2GTFS)
 library(tidyverse)
 ```
-
+It will take a while to convert the downloaded XML files in the zip folder to the ideal gtfs data. 
 
 ```{r}
-path_in <- "input/L.zip"
+path_in <- "L.zip" #this is the downloaded data of London PT services from TransXchange
 gtfs <- transxchange2gtfs(path_in = path_in,
- ncores = 3)
+ ncores = 4)
 ```
-Save the converted version of gtfs. 
+! can not convert due to download failed when downloading stops data csv file. 
+
+Save the converted version of gtfs to input folder under the name London_GTFS. 
 
 ```{r}
-gtfs_write(gtfs, folder = "C:/Users/99/Documents/CASA/Dissertation_data/input", name = "London_GTFS")
+gtfs_write(gtfs, 
+           folder = "C:/Users/99/Documents/CASA/Dissertation_data/input", 
+           name = "London_GTFS")
+```
+
+```{r}
+gtfs <- gtfs_clean(gtfs)
+gtfs <- gtfs_force_valid(gtfs)
 ```
 
 ## Elevation 

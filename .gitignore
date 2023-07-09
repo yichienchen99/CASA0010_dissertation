@@ -164,7 +164,9 @@ cython_debug/
 
 /data/*
 /input*
+/test*
 /gtfs_london*
 
 *.png
+
 
