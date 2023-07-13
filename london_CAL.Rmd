@@ -1,10 +1,10 @@
 ---
-title: "CAL_camden"
+title: "london_CAL"
 output: html_document
-date: "2023-06-11"
+date: "2023-07-13"
 ---
 
-This is a sample borough level CAL calculation in Camden, to reduce the OD pairs being processed to speed up the calculation to test the method. Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
+This is the London level CAL calculation. Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
 
 ```{r}
 # to increase available memory to java for r5r to 12GB
@@ -66,31 +66,23 @@ origin <- fread(file.path("input/origin.csv"))
 destin <- fread(file.path("input/destination.csv"))
 ```
 
+```{r}
+origin_sf <- origin %>%
+  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
+
+destin_sf <- destin %>%
+  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
+```
+
 Since this file is for Camden only,  select the points in Camden by GSS_CODE = E09000007, and then map the points on map to check if they are in the correct. Since it is now data frame with lat lon info, the point data will be converted to sf object for easy mapping. 
 
-```{r}
-origin_cam_sf <- origin %>%
-  filter(gss_code == "E09000007")%>%
-  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
+Then get the london boundary for mapping. 
 
-destin_cam_sf <- destin %>%
-  filter(gss_code == "E09000007")%>%
-  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
-```
-
-```{r}
-destin_cam_sf_ameni <- destin_cam_sf %>%
-  filter(amenities == 1)
-
-destin_cam_sf_stati <- destin_cam_sf %>%
-  filter(stations == 1)
-```
-
-Then get the camden boundary for mapping. 
 ```{r}
 london <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
   st_transform(., 4326)
 ```
+
 ```{r}
 london <-london%>%
   mutate(inner_outer = case_when(ons_inner == "F" ~ "Outer London",
@@ -108,78 +100,23 @@ tm_shape(london) +
   tm_scale_bar(breaks = c(0, 2, 4),position=c("left", "bottom")) +
   tm_credits("Data source: ONS", fontface = "italic", position=c("left", "bottom"))
 
-
 map_context
-
 ```
 
 ```{r}
 tmap_save(map_context, 'london_boroughs.png')
 ```
 
-```{r}
-camden <- london%>%
-  filter(gss_code == "E09000007")
 
-# London borough boundary used in this project can be accessed here (updated on 1 July, 2023): https://liveuclac-my.sharepoint.com/:u:/g/personal/zcfther_ucl_ac_uk/EbkIZlq6MFdIniLUboFm6_8B9r5YMsm_0m-8S6yMHy9Ulg?e=mgkVYi 
+London borough boundary used in this project can be accessed here (updated on 1 July, 2023): https://liveuclac-my.sharepoint.com/:u:/g/personal/zcfther_ucl_ac_uk/EbkIZlq6MFdIniLUboFm6_8B9r5YMsm_0m-8S6yMHy9Ulg?e=mgkVYi 
 
-# the data is sourced on 30 May, 2023 from London Datastore produced by GLA: https://data.london.gov.uk/dataset/london_boroughs
-```
-
-Then map 
-
-```{r}
-tmap_mode("plot")
-t_0 = 
-tm_shape(camden) +
-  tm_polygons(col = NA, alpha = 0.5) +
-tm_shape(origin_cam_sf) +
-  tm_dots(col = "blue") +
-tm_shape(destin_cam_sf_ameni) +
-  tm_dots(col = "red") + 
-tm_shape(destin_cam_sf_stati) +
-  tm_dots(col = "green")
-
-t_0
-```
-
-```{r}
-tmap_save(t_0, 'draft_points.png')
-```
+The data is sourced on 30 May, 2023 from London Datastore produced by GLA: https://data.london.gov.uk/dataset/london_boroughs
 
 The polygon grid is also needed for mapping the result. The data is also downloaded from TfL. 
 
 ```{r}
 grid <- st_read(here::here("data/PTAL_grid_cell_2015/PTAL_100m_Grid_Cells.shp"))%>%
   st_transform(., 4326)
-```
-
-```{r}
-camden_grid <- grid[camden,]
-```
-
-```{r}
-tmap_mode("plot")
-tm_shape(camden_grid) +
-  tm_polygons(col = NA, 
-              alpha = 0) +
-tm_shape(camden) +
-  tm_polygons(col = NA, 
-              alpha = 0) 
-```
-
-Map the network created by r5r from OSM route data. 
-
-```{r}
-street_net <- street_network_to_sf(r5r_core)
-street_net_l <- street_net$edges
-street_net_cam = street_net_l[camden, , op = sf::st_within]
-
-# plot
-ggplot() +
-  geom_sf(data = street_net_cam, color='gray85') +
-  #facet_wrap(.~option) + 
-  theme_void()
 ```
 
 
@@ -207,16 +144,16 @@ departure_datetime_off = as.POSIXct("27-05-2023 11:00:00",
 r5r requires the id of points to be in character, not integer.. 
 
 ```{r}
-origin_cam_sf$id <- origin_cam_sf$id%>%
+origin_sf$id <- origin_sf$id%>%
   as.character(.)
 
-destin_cam_sf$id <- destin_cam_sf$id%>%
+destin_sf$id <- destin_sf$id%>%
   as.character(.)
 
-destin_cam_sf_ameni$id <- destin_cam_sf_ameni$id%>%
+destin_sf_ameni$id <- destin_sf_ameni$id%>%
   as.character(.)
 
-destin_cam_sf_stati$id <- destin_cam_sf_stati$id%>%
+destin_sf_stati$id <- destin_sf_stati$id%>%
   as.character(.)
 ```
 
@@ -225,8 +162,8 @@ Estimate the travel time by walking. This will be the travel time of all the pos
 ```{r}
 # estimate travel time matrix for walk
 ttm_walk <- expanded_travel_time_matrix(r5r_core = r5r_core,   
-                          origins = origin_cam_sf,
-                          destinations = destin_cam_sf,    
+                          origins = origin_sf,
+                          destinations = destin_sf,    
                           mode = c("WALK","TRANSIT"),
                           max_walk_time = max_walk_time,
                           max_trip_duration = max_trip_duration,
@@ -243,15 +180,15 @@ The output contains 1,532,790 rows, indicating the amount of valid OD pairs with
 Similarly, for cycle modes, OD pairs with destination as bus stop will be removed.  
 
 ```{r}
-destin_cam_sf_bike <- destin_cam_sf %>%
+destin_sf_bike <- destin_sf %>%
   filter(bus_stop == 0)
 ```
 
 ```{r}
 # estimate travel time matrix for bike
 ttm_bike <- expanded_travel_time_matrix(r5r_core = r5r_core,   
-                          origins = origin_cam_sf,
-                          destinations = destin_cam_sf_bike,    
+                          origins = origin_sf,
+                          destinations = destin_sf_bike,    
                           mode = c("BICYCLE","TRANSIT"),
                           max_bike_time = max_bike_time,
                           max_trip_duration = max_trip_duration,
@@ -286,13 +223,13 @@ TAT_bike <- ttm_bike%>%
 ```{r}
 TAT_walk <- TAT_walk%>%
   select("from_id", "to_id","TAT_walk")%>%
-  left_join(.,origin_cam_sf,by= join_by("from_id"=="id"))%>%
+  left_join(.,origin_sf,by= join_by("from_id"=="id"))%>%
   st_as_sf(., crs = 4326)%>%
   select("from_id","to_id","TAT_walk","AI2015","PTAL2015","geometry")
 
 TAT_bike <- TAT_bike%>%
   select("from_id", "to_id","TAT_bike")%>%
-  left_join(.,origin_cam_sf,by= join_by("from_id"=="id"))%>%
+  left_join(.,origin_sf,by= join_by("from_id"=="id"))%>%
   st_as_sf(., crs = 4326)%>%
   select("from_id","to_id","TAT_bike","AI2015","PTAL2015","geometry")
 ```
@@ -310,9 +247,9 @@ tmap_mode("plot")
 TAT_by_origin =
   tm_shape(TAT_walk_average) +
   tm_dots(col = "average_TAT",palette="YlOrBr",scale = 3, colorNA = 'white', showNA = FALSE) +
-tm_shape(destin_cam_sf_stati) +
+tm_shape(destin_sf_stati) +
   tm_dots(col = "blue",alpha=0.5)+
-tm_shape(camden) +
+tm_shape(London) +
   tm_polygons(col = NA, alpha = 0)
 
 TAT_by_origin
@@ -327,7 +264,7 @@ merge the average waiting time with the geometry to plot the difference in waiti
 TAT_wait_average<-ttm_walk%>%
   group_by(from_id)%>%
   summarise (average_wait = mean(wait_time))%>%
-  merge(origin_cam_sf[,c("id","geometry")], by.x = "from_id", by.y = "id")%>%
+  merge(origin_sf[,c("id","geometry")], by.x = "from_id", by.y = "id")%>%
   st_as_sf(., crs = 4326)
 
 ```
@@ -337,9 +274,9 @@ tmap_mode("plot")
 aver_wait_time_by_origin =
   tm_shape(TAT_wait_average) +
   tm_dots(col = "average_wait",palette="YlOrBr",scale = 3, colorNA = 'white', showNA = FALSE) +
-tm_shape(destin_cam_sf_stati) +
+tm_shape(destin_sf_stati) +
   tm_dots(col = "blue",alpha=0.5)+
-tm_shape(camden) +
+tm_shape(London) +
   tm_polygons(col = NA, alpha = 0)
 
 aver_wait_time_by_origin
@@ -357,7 +294,7 @@ bike_destin <- ttm_bike %>%
   filter(str_detect(`routes`, "BICYCLE"))%>%
   group_by(to_id)%>%
   summarise(count=n())%>%
-  left_join(.,destin_cam_sf,by= join_by("to_id"=="id"))%>%
+  left_join(.,destin_sf,by= join_by("to_id"=="id"))%>%
     st_as_sf(., crs = 4326)
 ```
 
@@ -369,7 +306,7 @@ tmap_mode("plot")
 map_demand = 
 tm_shape(bike_destin) +
   tm_dots(size=1,col="count",palette="RdYlBu",alpha=0.6)+
-tm_shape(camden)+
+tm_shape(London)+
   tm_polygons(col=NA,alpha=0)
 
 map_demand
@@ -389,9 +326,8 @@ Since the CID data can be accessed using R package easily, the data will be be p
 ```{r}
 cid_parking = get_cid_points(type = "cycle_parking")  # select parking point data from the database
 
-cid_parking_cam <-cid_parking%>%
-  select("FEATURE_ID","PRK_CPT","BOROUGH","geometry")%>%
-  filter(BOROUGH == "Camden")  #Keep only the data within Camden. 
+cid_parking <-cid_parking%>%
+  select("FEATURE_ID","PRK_CPT","BOROUGH","geometry")
 ```
 
 To get an overview of the spatial distribution of parking facility in the borough, map the parking facility by the capacity at each spot. 
@@ -400,9 +336,9 @@ To get an overview of the spatial distribution of parking facility in the boroug
 tmap_mode("plot")
 
 map_parking =
-tm_shape(cid_parking_cam) +
+tm_shape(cid_parking) +
   tm_dots(size=0.05,col="PRK_CPT",palette="RdYlBu",style = "jenks", n=6)+
-tm_shape(camden)+
+tm_shape(London)+
   tm_polygons(col=NA,alpha=0)
 
 map_parking
@@ -427,7 +363,7 @@ max_trip_duration_park <- 10 # minutes
 ```
 
 ```{r}
-cid_parking_cam$id <- cid_parking_cam$FEATURE_ID%>%
+cid_parking$id <- cid_parking$FEATURE_ID%>%
   as.character(.)
 ```
 
@@ -436,8 +372,8 @@ Then estimate travel time between destinations (PT stations and key amenities) a
 ```{r}
 # estimate travel time matrix for walk
 ttm_park <- travel_time_matrix(r5r_core = r5r_core,   
-                          origins = destin_cam_sf,
-                          destinations = cid_parking_cam,    
+                          origins = destin_sf,
+                          destinations = cid_parking,    
                           mode = c("bicycle"),
                           max_bike_time = max_bike_time_park,
                           max_trip_duration = max_trip_duration_park,
@@ -450,7 +386,7 @@ head(ttm_park, n = 10)
 
 ```{r}
 ttm_park <-ttm_park %>%
-  left_join(.,cid_parking_cam,by= join_by("to_id"=="id"))%>%
+  left_join(.,cid_parking,by= join_by("to_id"=="id"))%>%
     st_as_sf(., crs = 4326)
 
 ```
@@ -491,7 +427,7 @@ tmap_mode("plot")
 map_park_index = 
 tm_shape(ttm_park_index) +
   tm_dots(size = 0.05, col = "park_index",palette="-RdYlBu", style = "quantile", n=6) +
-tm_shape(camden) +
+tm_shape(London) +
   tm_polygons(col = NA, alpha = 0)
 
 t4 = tmap_arrange(map_park_index,map_parking,nrow=1)
@@ -608,19 +544,7 @@ ttm_all_ai <- ttm_all_test %>%
   group_by(from_id)%>%
   summarize(max=max(EDF),sum=sum(EDF),AI=0.5*max(EDF)+0.5*sum(EDF),count=n())
 ```
- 
-- grid centroids to polygon grid for better visualisation. 
 
-```{r}
-camden_grid$OBJECTID <- camden_grid$OBJECTID%>%
-  as.character(.)
-
-ttm_all_ai_grid <- ttm_all_ai%>%
-  st_drop_geometry()%>%
-  left_join(.,camden_grid,by= join_by("from_id"=="OBJECTID"))%>%
-  st_as_sf(., crs = 4326)
-  
-```
 
 ```{r}
 #origin_cam_sf$id<-as.character(origin_cam_sf$id)
@@ -638,20 +562,19 @@ library(tmap)
  
 tmap_mode("plot")
 map_AI_w_parking =
-  tm_shape(ttm_all_ai_grid) +
-  tm_polygons(col = "AI",palette="-viridis",
+  tm_shape(ttm_all_ai) +
+  tm_dots(col = "AI",palette="-viridis",
           n = 6,
           style = "equal",
           scale = 3, 
           showNA = FALSE,
           colorNA = 'white',
           legend.hist = TRUE,
-          title = "Access Index",
-          border.alpha = 0) +
-tm_shape(destin_cam_sf_ameni) +
+          title = "Access Index",) +
+tm_shape(destin_sf_ameni) +
   tm_dots(col = "blue",
           alpha=0.5)+
-tm_shape(camden) +
+tm_shape(London) +
   tm_polygons(col = NA, 
               alpha = 0)+ 
   tm_layout(title="AI with parking time",
@@ -679,11 +602,6 @@ ttm_all_test2 <- ttm_all_test2 %>%
 ttm_all_ai2 <- ttm_all_test2 %>%
   group_by(from_id)%>%
   summarize(max=max(EDF),sum=sum(EDF),AI=0.5*max(EDF)+0.5*sum(EDF),count=n())
-
-ttm_all_ai_grid2 <- ttm_all_ai2%>%
-  st_drop_geometry()%>%
-  left_join(.,camden_grid,by= join_by("from_id"=="OBJECTID"))%>%
-  st_as_sf(., crs = 4326)
 ```
 
 ```{r}
@@ -697,8 +615,8 @@ ttm_all_ai_grid2 <- ttm_all_ai2%>%
 
 tmap_mode("plot")
 map_AI_wo_parking = 
-  tm_shape(ttm_all_ai_grid2) +
-  tm_polygons(col = "AI",
+  tm_shape(ttm_all_ai2) +
+  tm_dots(col = "AI",
           palette="-viridis",
           n = 6,
           style = "equal",
@@ -706,12 +624,11 @@ map_AI_wo_parking =
           showNA = FALSE,
           colorNA = 'white',
           legend.hist = TRUE,
-          title = "Access Index",
-          border.alpha = 0) +
-tm_shape(destin_cam_sf_ameni) +
+          title = "Access Index",) +
+tm_shape(destin_sf_ameni) +
   tm_dots(col = "blue",
           alpha=0.5)+
-tm_shape(camden) +
+tm_shape(London) +
   tm_polygons(col = NA, 
               alpha = 0)+
   tm_layout(title="AI without parking time",
@@ -754,18 +671,11 @@ tmap_save(t5, 'draft_output.png')
 Map AI from PTAL. (Admittedly, the current comparison between PTAL and CAL is less convincing since the PTAL is the scored index at London level and the CAL for now only estimated within Camden's boundary. The CAL estimated for London will be comparable to PTAL. However, this file is for the testing purpose of the method and codes, so the following code will proceed.)
 
 ```{r}
-origin_cam_sf_grid <- origin_cam_sf%>%
-  st_drop_geometry()%>%
-  left_join(.,camden_grid,by= join_by("id"=="OBJECTID"))%>%
-  st_as_sf(., crs = 4326)
-```
-
-```{r}
 
 tmap_mode("plot")
 PTAL_AI = 
-  tm_shape(origin_cam_sf_grid) +
-  tm_polygons(col = "AI2015",
+  tm_shape(origin_sf) +
+  tm_dots(col = "AI2015",
           palette="-viridis",
           n = 6,
           style = "equal",
@@ -773,12 +683,11 @@ PTAL_AI =
           showNA = FALSE,
           colorNA = 'white',
           legend.hist = TRUE,
-          title = "Access Index",
-          border.alpha = 0) +
-tm_shape(destin_cam_sf_ameni) +
+          title = "Access Index",) +
+tm_shape(destin_sf_ameni) +
   tm_dots(col = "blue",
           alpha=0.5)+
-tm_shape(camden) +
+tm_shape(London) +
   tm_polygons(col = NA, 
               alpha = 0)+
   tm_layout(title="AI 2015 (PTAL)",
@@ -796,6 +705,19 @@ The output clearly shows the difference between north and south of the borough. 
 ## Local Moran's I
 
 spatial weight matrix 
+
+
+- grid centroids to polygon grid
+```{r}
+grid$OBJECTID <- grid$OBJECTID%>%
+  as.character(.)
+
+ttm_all_ai_grid <- ttm_all_ai%>%
+  st_drop_geometry()%>%
+  left_join(.,grid,by= join_by("from_id"=="OBJECTID"))%>%
+  st_as_sf(., crs = 4326)
+  
+```
 
 - using polygon to generate weigh matrix
 
