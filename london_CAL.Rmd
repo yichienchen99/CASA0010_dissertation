@@ -7,8 +7,8 @@ date: "2023-07-13"
 This is the London level CAL calculation. Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
 
 ```{r}
-# to increase available memory to java for r5r to 12GB
-options(java.parameters = "-Xmx12G")
+# to increase available memory to java for r5r to 20GB
+options(java.parameters = "-Xmx20G")
 ```
 
 # load packages 
@@ -49,9 +49,6 @@ The above files are for r5r travel time estimates. The other files are generated
 r5r_core <- setup_r5(data_path = "C:/Users/99/Documents/CASA/dissertation_test/input")
 
 # or the input directory can be accessed from the shared OneDrive folder here (updated on 1 July, 2023): https://liveuclac-my.sharepoint.com/:f:/g/personal/zcfther_ucl_ac_uk/Em3mws5GdBVJoyMIZv4S4wwBAACSWSiw5kED4jIvOYGzhg?e=qA5jYG
-
-
-
 ```
 
 It takes longer time to get the r5r_core for the first time, and after that r5r will use the cached network.dat in the same directory of data_path to get the network. 
@@ -94,11 +91,7 @@ tmap_mode("plot")
 map_context = 
 tm_shape(london) +
   tm_polygons(col = "inner_outer", alpha = 0.5, title = "") +
-  tm_text("objectid",size = 0.7) +
-  tm_layout(frame = FALSE)+
-  tm_compass(position=c("left", "bottom")) + 
-  tm_scale_bar(breaks = c(0, 2, 4),position=c("left", "bottom")) +
-  tm_credits("Data source: ONS", fontface = "italic", position=c("left", "bottom"))
+  tm_text("objectid",size = 0.7) 
 
 map_context
 ```
@@ -117,6 +110,52 @@ The polygon grid is also needed for mapping the result. The data is also downloa
 ```{r}
 grid <- st_read(here::here("data/PTAL_grid_cell_2015/PTAL_100m_Grid_Cells.shp"))%>%
   st_transform(., 4326)
+```
+
+```{r}
+summarise(grid)
+```
+```{r}
+grid_small <- grid %>%
+  filter(X > median(X) - 500 & X < median(X) + 500) 
+
+grid_small <- grid_small %>%
+  filter(Y > median(Y) - 500 & Y < median(Y) + 500) 
+```
+
+```{r}
+origin_small <- origin_sf[grid_small,]
+```
+
+
+```{r}
+tmap_mode("plot")
+inset  = 
+tm_shape(grid_small) +
+  tm_polygons(col=NA, title = "") +
+  tm_layout(frame = FALSE, bg.color = NA)+
+tm_shape(origin_small) + 
+  tm_dots(scale = 0.3, col = "black")+
+  tm_layout(frame = FALSE, bg.color = NA)
+
+inset
+```
+
+```{r}
+library(grid)
+
+context_inset = map_context + 
+  tm_shape(grid_small) +
+  tm_polygons(col=NA, title = "") +
+  tm_layout(frame = FALSE, bg.color = NA, legend.position = c(0,0.05))+
+  tm_compass(position=c(0,0.2)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.13)) +
+  tm_credits("Data source: ONS and TfL", fontface = "italic", position=c(0,0))
+
+context_inset
+print(inset, vp = viewport(1, 0.3, width = 0.2, height = 0.2))
+
+tmap_save(context_inset,insets_tm = inset,insets_vp=viewport(x=.9, y=0.2, width=.27, height=.27), filename="map_context.png", dpi=600)
 ```
 
 
@@ -149,6 +188,12 @@ origin_sf$id <- origin_sf$id%>%
 
 destin_sf$id <- destin_sf$id%>%
   as.character(.)
+
+destin_sf_ameni <- destin_sf %>%
+  filter(amenities == 1)
+
+destin_sf_stati <- destin_sf %>%
+  filter(stations == 1)
 
 destin_sf_ameni$id <- destin_sf_ameni$id%>%
   as.character(.)

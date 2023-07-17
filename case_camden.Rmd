@@ -99,6 +99,7 @@ london <-london%>%
 
 ```{r}
 tmap_mode("plot")
+
 map_context = 
 tm_shape(london) +
   tm_polygons(col = "inner_outer", alpha = 0.5, title = "") +
@@ -107,7 +108,6 @@ tm_shape(london) +
   tm_compass(position=c("left", "bottom")) + 
   tm_scale_bar(breaks = c(0, 2, 4),position=c("left", "bottom")) +
   tm_credits("Data source: ONS", fontface = "italic", position=c("left", "bottom"))
-
 
 map_context
 
@@ -618,6 +618,7 @@ camden_grid$OBJECTID <- camden_grid$OBJECTID%>%
 ttm_all_ai_grid <- ttm_all_ai%>%
   st_drop_geometry()%>%
   left_join(.,camden_grid,by= join_by("from_id"=="OBJECTID"))%>%
+  replace(is.na(.), 0)%>%
   st_as_sf(., crs = 4326)
   
 ```
@@ -683,6 +684,7 @@ ttm_all_ai2 <- ttm_all_test2 %>%
 ttm_all_ai_grid2 <- ttm_all_ai2%>%
   st_drop_geometry()%>%
   left_join(.,camden_grid,by= join_by("from_id"=="OBJECTID"))%>%
+  replace(is.na(.), 0)%>%
   st_as_sf(., crs = 4326)
 ```
 
@@ -726,8 +728,8 @@ map_AI_wo_parking
 ```
 ```{r}
 #this chunk is just to compare the difference between the ones with and without parking time taking into account. 
-#map_AI_w_parking
-#map_AI_wo_parking
+map_AI_w_parking
+map_AI_wo_parking
 ```
 
 ```{r}
@@ -747,6 +749,183 @@ When parking time is not considered in the CAL on the right, the accessibility i
 ```{r}
 tmap_save(t5, 'draft_output.png')
 ```
+
+# export the data into csv
+```{r}
+colnames(ttm_all_ai_grid)
+```
+
+```{r}
+band1 <- 982
+band2 <- 1543
+band3 <- 2104
+band4 <- 2664
+band5 <- 3225
+
+AI_to_CAL <- ttm_all_ai_grid %>%
+  select("from_id", "AI", "geometry","X", "Y")%>%
+  mutate(CAL = case_when(AI < band1 ~ "1",
+                         AI > band1 & AI < band2  ~ "2",
+                         AI > band2 &  AI < band3  ~ "3",
+                         AI > band3 &  AI < band4  ~ "4",
+                         AI > band4 &  AI < band5  ~ "5",
+                         AI > band5 ~ "6",
+                         TRUE ~ "0"))
+
+```
+
+
+
+```{r}
+library(tmap)
+ 
+tmap_mode("plot")
+map_cal =
+  tm_shape(AI_to_CAL) +
+  tm_polygons(col = "CAL",palette="-viridis",
+          showNA = FALSE,
+          colorNA = 'white',
+          title = "cycle access level",
+          border.alpha = 0) +
+tm_shape(destin_cam_sf_ameni) +
+  tm_dots(col = "blue",
+          alpha=0.5)+
+tm_shape(camden) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+  tm_layout(title="CAL",
+             frame = FALSE,
+             legend.outside = TRUE,
+             legend.text.size = 1,
+             legend.hist.size = 1,
+             legend.hist.width = 0.75)
+
+
+map_cal
+```
+
+```{r}
+st_write(AI_to_CAL, "case_camden.csv", package="sf")
+```
+
+# spatial autocorrelation 
+
+Areas with high accessibility can be also influential to their surrounding locations. People living in the grid close to high AI values can also enjoy the good proximity and accessibility through sustainable transport. Hence, spatial autocorrelation of the CAL or AI values will be assessed to see if there is any cluster of such places that could be the ideal locations for cycle infrastructure investment and new housing development projects.  
+
+## Moran's I
+
+- Spatial weight matrix 
+
+```{r}
+#install.packages(spdep)
+library(spdep)
+
+coordsW <- ttm_all_ai_grid%>%
+  filter(AI > 0)%>%  # deselect NA values of access index for weight matrix.
+  st_centroid()%>%
+  st_geometry()%>%
+  st_transform(.,27700)
+
+ttm_all_ai_grid_27700 <- ttm_all_ai_grid%>%
+    filter(AI > 0)%>%
+  st_transform(.,27700)
+
+nb <- ttm_all_ai_grid_27700%>%
+  poly2nb(., queen=FALSE) #produce a neighbours list based on regions with contiguous boundaries
+
+#plot them
+plot(nb, st_geometry(coordsW), col="red")
+```
+
+```{r}
+listw <- nb2listw(nb)
+listw
+```
+- Computing the Global Moran’s I
+
+```{r}
+globalMoran <- moran.test(ttm_all_ai_grid_27700$AI, listw)
+globalMoran
+
+I <- globalMoran[["estimate"]][["Moran I statistic"]]
+I
+pvalue <- globalMoran[["p.value"]]
+pvalue
+```
+Global morans I statistic is 0.638 with p value close to 0. The p-value is statistically significant, and the z-score is positive. This reveals that the Access index is not randomly distributed among the features in Camden and the AI is clustered with similar values. 
+
+To see the location of the hot spots, local morans i can be measured for each grid. 
+Local spatial autocorrelation
+
+```{r}
+moran <- moran.plot(ttm_all_ai_grid_27700$AI, listw = nb2listw(nb, style = "W"))
+```
+- Compute local Moran
+
+```{r}
+local <- localmoran(x = ttm_all_ai_grid_27700$AI, listw = nb2listw(nb, style = "W"))
+
+moran.map <- cbind(ttm_all_ai_grid_27700, local)
+
+tm_shape(moran.map) +
+  tm_fill(col = "Ii",
+          style = "quantile",
+          title = "local moran statistic") +
+  tm_layout(title="local morans I",
+             frame = FALSE,
+             legend.outside = TRUE,
+            legend.text.size = 1,
+             legend.hist.size = 1,
+             legend.hist.width = 0.75)
+```
+
+[interpretation]
+
+- Plot LISA clusters
+
+```{r}
+quadrant <- vector(mode="numeric",length=nrow(local))
+
+# centers the variable of interest around its mean
+m.AI <- ttm_all_ai_grid_27700$AI - mean(ttm_all_ai_grid_27700$AI)     
+
+# centers the local Moran's around the mean
+m.local <- local[,1] - mean(local[,1])    
+
+# significance threshold
+signif <- 0.1 
+
+# builds a data quadrant
+quadrant[m.AI >0 & m.local>0] <- 4  
+quadrant[m.AI <0 & m.local<0] <- 1      
+quadrant[m.AI <0 & m.local>0] <- 2
+quadrant[m.AI >0 & m.local<0] <- 3
+quadrant[local[,5]>signif] <- 0   
+
+
+quadrant.map <- cbind(ttm_all_ai_grid_27700, quadrant)
+
+quadrant.map <- quadrant.map %>%
+  mutate(cluster = case_when(quadrant == 0 ~ "insignificant",
+                             quadrant == 1 ~ "low-low",
+                             quadrant == 2 ~ "low-high",
+                             quadrant == 3 ~ "high-low",
+                             quadrant == 4 ~ "high-high"))
+
+cluster.map <- quadrant.map%>%
+  select("geometry","cluster")
+```
+
+```{r}
+brks <- c(0,1,2,3,4)
+colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
+plot(cluster.map,
+     border="lightgray",
+     col=colors[findInterval(quadrant,brks,all.inside=FALSE)])
+legend("bottomleft", legend = c("insignificant","low-low","low-high","high-low","high-high"),
+       fill=colors,bty="n")
+```
+
 
 
 # Objective 3: identify areas of potential using data from PTAL and CAL 
@@ -793,104 +972,52 @@ PTAL_AI
 ```
 The output clearly shows the difference between north and south of the borough. This is largely due to the Euston and Kings Cross areas have higher density of destinations. 
 
-## Local Moran's I
-
-spatial weight matrix 
-
-- using polygon to generate weigh matrix
-
 ```{r}
-#install.packages(spdep)
-library(spdep)
-nb <- ttm_all_ai_grid%>%
-  poly2nb(.) #produce a neighbours list based on regions with contiguous boundaries
-listw <- nb%>%
-  nb2listw(., style = "W") #supplements the neighbours list with spatial weights for the chosen coding scheme. W is row standardised (sums over all links to n)
+origin_cam_sf_grid_1 <-origin_cam_sf_grid%>%
+  select("ID","AI2015","PTAL2015")%>%
+  st_drop_geometry()
+
+origin_cam_sf_grid_1$ID <- origin_cam_sf_grid_1$ID%>%
+  as.character(.)
+
+ptal_cal <- left_join(
+  quadrant.map,
+  origin_cam_sf_grid_1,
+  by = join_by("from_id"=="ID"))
+
+colnames(ptal_cal)
+```
+```{r}
+ptal_cal<-ptal_cal%>%
+  select("from_id", "AI", "cluster", "AI2015", "PTAL2015", "geometry")
 ```
 
-- Computing the Global Moran’s I
+Then find the areas with high-high values for CAL's AI and areas with PTAL2015 is 0 to 2. 
 
 ```{r}
-I_Camdengrid_Global_AI <- ttm_all_ai_grid %>%
-  pull(AI) %>%
-  as.vector()%>%
-  moran.test(., listw,na.action =  na.exclude)
+lowptal <- c( "0", "1a", "1b", "2")
 
-I_Camdengrid_Global_AI
-```
+ptal_cal <- ptal_cal %>%
+  mutate(AoI = case_when(PTAL2015 %in% unlist(lowptal) & cluster == "high-high" ~ 1, 
+                         TRUE ~ NA))
 
-[interpretation]
-
--table with the Local Moran’s I
-
-```{r}
-#use the localmoran function to generate I for each ward in the city
-
-I_Camdengrid_local_AI <- ttm_all_ai_grid %>%
-  pull(AI) %>%
-  as.vector()%>%
-  localmoran(., listw, na.action =  na.exclude)%>%
-  as_tibble()
-
-#what does the output (the localMoran object) look like?
-
-slice_head(I_Camdengrid_local_AI, n=5)
-```
-
-```{r}
-ttm_all_ai_grid <- ttm_all_ai_grid %>%
-  mutate(AI_I = as.numeric(I_Camdengrid_local_AI$Ii))%>%
-  mutate(AI_Iz =as.numeric(I_Camdengrid_local_AI$Z.Ii))
-```
-
-```{r}
-breaks1<-c(-1000,-2.58,-1.96,-1.65,1.65,1.96,2.58,1000)
-
-library(RColorBrewer)
-
-MoranColours<- rev(brewer.pal(8, "RdGy"))
-
-tm_shape(ttm_all_ai_grid) +
-    tm_polygons("AI_Iz",
-        style="fixed",
-        breaks=breaks1,
-        palette=MoranColours,
-        midpoint=NA,
-        title="Local Moran's I, Access Index in London")
-```
-
-
-### not done yet ###
-
-```{r}
-lmoran<- cbind(ttm_all_ai_grid@data, localmoran(ttm_all_ai_grid$AI, listw, p.adjust.method="none", adjust.x=TRUE))
-#lmoran
-
-# centers the local Moran's around the mean
-ttm_all_ai_grid$Ii_mean <- ttm_all_ai_grid$AI_I - mean(ttm_all_ai_grid$AI_I, na.rm = TRUE) 
-ttm_all_ai_grid$lag.AI<-  lag.listw(listw,ttm_all_ai_grid$AI, NAOK = TRUE)
-
-# centers the variable of interest around its mean
-
-ttm_all_ai_grid$AIs <- ttm_all_ai_grid$AI - mean(ttm_all_ai_grid$AI, na.rm = TRUE) 
-ttm_all_ai_grid$lag.AI <- ttm_all_ai_grid$lag.AI - mean(ttm_all_ai_grid$lag.AI, na.rm = TRUE) 
-
-signif <- 0.05
-#lmoran
-
-
-ttm_all_ai_grid <- ttm_all_ai_grid%>% 
-  mutate(quadrant= ifelse(AIs>0 & lag.AI > 0, 1, 0)) %>% 
-  mutate(quadrant= ifelse(AIs<0 & lag.AI < 0, 2, quadrant)) %>% 
- mutate(quadrant= ifelse(AIs<0 & lag.AI > 0, 3, quadrant)) %>% 
- mutate(quadrant= ifelse(AIs>0 & lag.AI < 0, 4, quadrant)) %>%   
-  mutate(quadrant= ifelse(ttm_all_ai_grid$`Pr(z > 0)` > signif, 0, quadrant)) %>% 
-  mutate(quadrant2= ifelse(AI_st>0 & lagAI_st > 0, 1, 0)) %>% 
-mutate(quadrant2= ifelse(AI_st<0 & lagAI_st < 0, 2, quadrant2)) %>% 
-  mutate(quadrant2= ifelse(AI_st<0 & lagAI_st > 0, 3, quadrant2)) %>% 
- mutate(quadrant2= ifelse(AI_st>0 & lagAI_st < 0, 4, quadrant2)) %>% 
- mutate(quadrant2= ifelse(ttm_all_ai_grid$LISA_PANC > signif, 0, quadrant2))
-  
+AoI = tm_shape(ptal_cal) +
+  tm_polygons(col = "AoI",
+          palette="red",
+          showNA = FALSE,
+          colorNA = 'white',
+          title = "Area with low PTAL and high CAL",
+          border.alpha = 0)+
+tm_shape(camden) +
+  tm_polygons(col = NA, 
+              alpha = 0)+
+  tm_layout(title="Area of Interest",
+             frame = FALSE,
+             legend.outside = TRUE,
+             legend.text.size = 1,
+             legend.hist.size = 1,
+             legend.hist.width = 0.75)
+AoI
 ```
 
 
