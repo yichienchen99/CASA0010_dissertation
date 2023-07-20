@@ -4,7 +4,7 @@ output: html_document
 date: "2023-06-11"
 ---
 
-This is a sample borough level CAL calculation in Camden, to reduce the OD pairs being processed to speed up the calculation to test the method. Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
+This is a sample borough level CAL calculation in Camden, to reduce the OD pairs being processed to speed up the calculation to test the method. The complete version of this code for London level analysis is in the london_CAL.Rmd file. Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
 
 ```{r}
 # to increase available memory to java for r5r to 12GB

@@ -1,0 +1,107 @@
+---
+title: "study_area"
+output: html_document
+date: "2023-07-19"
+---
+
+# load packages 
+
+```{r}
+library(sf)
+library(data.table)
+library(dplyr)
+library(tmap)
+library(grid)
+library(stringr)
+```
+
+```{r}
+london <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
+  st_transform(., 4326)%>%
+  mutate(inner_outer = case_when(ons_inner == "F" ~ "Outer London",
+         TRUE ~ "Inner London"))
+```
+
+```{r}
+origin_sf <- fread(file.path("input/origin.csv"))%>%
+  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)%>%
+  select("id","AI2015","PTAL2015","geometry")
+
+origin_sf <- origin_sf[london,]
+```
+
+```{r}
+tmap_mode("plot")
+
+map_context = 
+tm_shape(london) +
+  tm_polygons(col = "inner_outer", alpha = 0.5, title = "") +
+  tm_text("objectid",size = 0.7) 
+
+map_context
+```
+
+
+
+
+```{r}
+#tmap_save(map_context, 'london_boroughs.png')
+```
+
+
+London borough boundary used in this project can be accessed here (updated on 1 July, 2023): https://liveuclac-my.sharepoint.com/:u:/g/personal/zcfther_ucl_ac_uk/EbkIZlq6MFdIniLUboFm6_8B9r5YMsm_0m-8S6yMHy9Ulg?e=mgkVYi 
+
+The data is sourced on 30 May, 2023 from London Datastore produced by GLA: https://data.london.gov.uk/dataset/london_boroughs
+
+The polygon grid is also needed for mapping the result. The data is also downloaded from TfL. 
+
+```{r}
+grid <- st_read(here::here("data/PTAL_grid_cell_2015/PTAL_100m_Grid_Cells.shp"))%>%
+  st_transform(., 4326)
+```
+For visualisation of context map, a sample of grids in London will be extracted. 
+
+```{r}
+grid_small <- grid %>%
+  filter(X > median(X) - 500 & X < median(X) + 500)%>%
+  filter(Y > median(Y) - 500 & Y < median(Y) + 500) 
+```
+
+```{r}
+origin_small <- origin_sf[grid_small,]
+```
+
+```{r}
+tmap_mode("plot")
+
+inset  = 
+tm_shape(grid_small) +
+  tm_polygons(col=NA, title = "") +
+  tm_layout(frame = FALSE, bg.color = NA)+
+tm_shape(origin_small) + 
+  tm_dots(scale = 0.3, col = "black")+
+  tm_layout(frame = FALSE, bg.color = NA)
+
+inset
+```
+### map the geo boundary context 
+
+```{r}
+tmap_mode("plot")
+
+context_inset = map_context + 
+  tm_shape(grid_small) +
+  tm_polygons(col=NA, title = "") +
+  tm_layout(frame = FALSE, bg.color = NA, legend.position = c(0,0.05))+
+  tm_compass(position=c(0,0.2)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.13)) +
+  tm_credits("Data source: ONS and TfL", fontface = "italic", position=c(0,0))
+
+context_inset
+print(inset, vp = viewport(.9, .2, width = 0.27, height = 0.27))
+```
+
+
+```{r}
+tmap_save(context_inset,insets_tm = inset,insets_vp=viewport(x=.9, y=0.2, width=.27, height=.27), filename="map_context.png", dpi=600)
+```
