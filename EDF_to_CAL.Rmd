@@ -1,0 +1,662 @@
+
+# EDF to CAL
+
+# load packages 
+
+```{r}
+library(sf)
+library(data.table)
+library(dplyr)
+library(tmap)
+library(grid)
+library(stringr)
+
+#install.packages(spdep)
+library(spdep)
+```
+
+## EDF to AI 
+
+```{r}
+ttm_all_ai <- fread(file.path("london_edf.csv"))
+```
+
+```{r}
+ttm_all_ai <- ttm_all_ai %>%
+  group_by(from_id)%>%
+  summarize(AI=0.5*max(EDF)+0.5*sum(EDF))
+```
+
+## AI to CAL 
+
+```{r}
+MAX = max(ttm_all_ai$AI, na.rm = TRUE)
+N = 6
+```
+
+```{r}
+band1 <- MAX/N
+band2 <- 2*MAX/N
+band3 <- 3*MAX/N
+band4 <- 4*MAX/N
+band5 <- 5*MAX/N
+```
+
+
+```{r}
+AI_to_CAL <- ttm_all_ai %>%
+  mutate(CAL = case_when(AI < band1 ~ "1",
+                         AI > band1 & AI < band2  ~ "2",
+                         AI > band2 &  AI < band3  ~ "3",
+                         AI > band3 &  AI < band4  ~ "4",
+                         AI > band4 &  AI < band5  ~ "5",
+                         AI > band5 ~ "6",
+                         TRUE ~ "0"))
+
+```
+
+## merge ptal data
+
+```{r}
+origin_sf <- fread(file.path("input/origin.csv"))%>%
+  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)%>%
+  select("id","AI2015","PTAL2015","geometry")
+
+origin<-origin_sf%>%
+  st_drop_geometry()
+
+CAL_and_PTAL <-AI_to_CAL%>%
+  left_join(.,origin,by= join_by("from_id"=="id"))
+```
+
+## add grid polygon for mapping
+
+```{r}
+grid <- st_read(here::here("data/PTAL_grid_cell_2015/PTAL_100m_Grid_Cells.shp"))%>%
+  st_transform(., 4326)%>%
+  select("ID")
+
+CAL_and_PTAL <-grid%>%
+  left_join(.,CAL_and_PTAL,by= join_by("ID"=="from_id"))%>%
+  st_as_sf()
+```
+
+## add london map for mapping 
+
+```{r}
+london <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
+  st_transform(., 4326)%>%
+  mutate(inner_outer = case_when(ons_inner == "F" ~ "Outer London",
+         TRUE ~ "Inner London"))
+```
+
+To check if the grid data is complete. 
+
+```{r}
+tmap_mode("plot")
+
+grid_map =
+  tm_shape(grid) +
+  tm_polygons(col = "black",
+          border.alpha = 0) +
+tm_shape(london) +
+  tm_polygons(col = NA, 
+              alpha = 0)
+
+grid_map
+```
+
+
+```{r}
+tmap_mode("plot")
+
+map_AI_w_parking_grid =
+  tm_shape(CAL_and_PTAL) +
+  tm_polygons(col = "AI",palette="-viridis",
+          n = 6,
+          style = "equal",
+          scale = 3, 
+          showNA = FALSE,
+          colorNA = 'black',
+          legend.hist = TRUE,
+          title = "Access Index",
+          border.alpha = 0) +
+tm_shape(london) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(title="AI with parking time",
+             frame = FALSE,
+             legend.outside = TRUE,
+             legend.text.size = 1,
+             legend.hist.size = 1,
+             legend.hist.width = 0.75)
+
+
+map_AI_w_parking_grid
+```
+Why there are so many NA values. Even areas of high accessibility potentially have no values like in inner London boroughs... 
+
+# map CAL and PTAL for London 
+
+```{r}
+COLOR = c('white','#fde725',"#7ad151", "#22a884", "#2a788e", "#414487", "#440154")
+# this is just the Viridis colour code from https://waldyrious.net/viridis-palette-generator/ with white as the initial colour for NA/0 values
+Labels_CAL = c('0: missing values', '1: least accessible','2','3','4','5','6: most accessible')
+
+tmap_mode("plot")
+
+map_cal =
+  tm_shape(CAL_and_PTAL) +
+  tm_polygons(col = "CAL",palette=COLOR,
+          showNA = FALSE,
+          colorNA = 'white',
+          title = "CAL",
+          border.alpha = 0,
+          labels= Labels_CAL) +
+tm_shape(london) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(bg.color = NA, 
+            legend.position = c(.85,0.05),
+            main.title="Cycle Access Level",
+          main.title.size = 1,
+            frame = FALSE,
+           legend.text.size = 0.7)+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM, GLA, TfL. R package: r5r.", fontface = "italic", position=c(0,0))
+
+map_cal
+```
+
+
+```{r}
+tmap_save(map_cal, 'london_cal.png')
+```
+
+
+```{r}
+Labels_PTAL = c('0: missing values', '1a: least accessible','1b','2','3','4','5','6a','6b: most accessible')
+
+
+tmap_mode("plot")
+
+map_ptal =
+  tm_shape(CAL_and_PTAL) +
+  tm_polygons(col = "PTAL2015",palette=COLOR,
+          showNA = FALSE,
+          colorNA = 'white',
+          title = "PTAL",
+          border.alpha = 0,
+          labels= Labels_PTAL) +
+tm_shape(london) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(bg.color = NA, 
+            legend.position = c(.85,0.05),
+            main.title="Public Transport Access Level",
+          main.title.size = 1,
+            frame = FALSE,
+            legend.text.size = 0.7)+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: TfL.", fontface = "italic", position=c(0,0))
+
+map_ptal
+```
+
+
+
+```{r}
+tmap_save(map_ptal, 'london_ptal.png')
+```
+
+## export the data into csv
+
+```{r}
+# drop Z dimension to export the data
+new <- st_zm(CAL_and_PTAL, drop=T, what='ZM')
+
+st_write(new, "london_cal.gpkg", driver = "GPKG",layer_options = "OVERWRITE=true")
+```
+
+# Spatial autocorrelation 
+
+Areas with high accessibility can be also influential to their surrounding locations. People living in the grid close to high AI values can also enjoy the good proximity and accessibility through sustainable transport. Hence, spatial autocorrelation of the CAL or AI values will be assessed to see if there is any cluster of such places that could be the ideal locations for cycle infrastructure investment and new housing development projects.  
+
+## Moran's I
+
+- Spatial weight matrix 
+```{r}
+new_dropna <-new %>%
+  filter(AI > 0)
+```
+
+```{r}
+coordsW <- new_dropna%>%
+  st_centroid()%>%
+  st_geometry()%>%
+  st_transform(.,27700)
+
+new_27700 <- new_dropna%>%
+  st_transform(.,27700)
+
+nb <- new_27700%>%
+  poly2nb(., queen=TRUE) #produce a neighbours list based on regions with contiguous boundaries
+
+#plot them
+plot(nb, st_geometry(coordsW), col="red")
+```
+
+```{r}
+listw <- nb2listw(nb, zero.policy = TRUE)
+
+```
+
+- Computing the Global Moran’s I
+
+```{r}
+globalMoran <- moran.test(new_27700$AI, listw, zero.policy=TRUE,na.action=na.omit)
+globalMoran
+
+I <- globalMoran[["estimate"]][["Moran I statistic"]]
+I
+pvalue <- globalMoran[["p.value"]]
+pvalue
+```
+
+Global morans I statistic is 0.638 with p value close to 0. The p-value is statistically significant, and the z-score is positive. This reveals that the Access index is not randomly distributed among the features in Camden and the AI is clustered with similar values. 
+
+To see the location of the hot spots, local morans i can be measured for each grid. This project includes codes that are adapted from https://rpubs.com/quarcs-lab/spatial-autocorrelation. 
+
+Local spatial autocorrelation
+
+```{r}
+moran <- moran.plot(new_27700$AI, listw = nb2listw(nb, style = "W", zero.policy = TRUE), zero.policy = TRUE, na.action= na.omit)
+```
+- Compute local Moran
+
+```{r}
+local <- localmoran(x = new_27700$AI, listw = nb2listw(nb, style = "W", zero.policy = TRUE), zero.policy = TRUE, na.action= na.omit)
+
+moran.map <- cbind(new_27700, local)
+
+tm_shape(moran.map) +
+  tm_fill(col = "Ii",
+          style = "quantile",
+          title = "local moran statistic") +
+  tm_layout(title="local morans I",
+             frame = FALSE,
+             legend.outside = TRUE,
+            legend.text.size = 1,
+             legend.hist.size = 1,
+             legend.hist.width = 0.75)
+```
+
+[interpretation]
+
+- Plot LISA clusters
+
+```{r}
+quadrant <- vector(mode="numeric",length=nrow(local))
+
+# centers the variable of interest around its mean
+m.AI <- new_27700$AI - mean(new_27700$AI)     
+
+# centers the local Moran's around the mean
+m.local <- local[,1] - mean(local[,1])    
+
+# significance threshold
+signif <- 0.1 
+
+# builds a data quadrant
+quadrant[m.AI >0 & m.local>0] <- "4"  
+quadrant[m.AI <0 & m.local<0] <- "1"      
+quadrant[m.AI <0 & m.local>0] <- "2"
+quadrant[m.AI >0 & m.local<0] <- "3"
+quadrant[local[,5]>signif] <- "0"   
+
+
+quadrant.map <- cbind(new_27700, quadrant)
+
+quadrant.map <- quadrant.map %>%
+  mutate(cluster = case_when(quadrant == "0" ~ "insignificant",
+                             quadrant == "1" ~ "low-low",
+                             quadrant == "2" ~ "low-high",
+                             quadrant == "3" ~ "high-low",
+                             quadrant == "4" ~ "high-high"))
+
+cluster.map <- quadrant.map%>%
+  select("geometry","cluster")
+```
+
+```{r}
+brks <- c("0","1","2","3","4")
+colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
+MyPalette <- c("white", "blue", "lightblue", "pink", "red" )
+MyAlphas = c(1, 1, .4, .4, 1)
+
+Labels = c("insignificant", "low-low", "low-high", "high-low" ,"high-high")
+  
+tmap_mode("plot")
+
+map_cluster = tm_shape(quadrant.map) +
+  tm_fill(col="quadrant",
+          breaks = brks,
+          palette=MyPalette,
+          showNA = FALSE,
+          colorNA = 'white',
+          title = "cluster",
+          border.alpha = 0,
+          labels= Labels) +
+tm_shape(london) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+  tm_layout(bg.color = NA, 
+            legend.position = c(.85,0.05),
+            main.title="LISA cluster map",
+            main.title.size = 1,
+             frame = FALSE,
+             legend.text.size = 0.7)+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM, GLA, TfL. R package: r5r.", fontface = "italic", position=c(0,0))
+
+map_cluster
+```
+
+This output shows that inner London as a large cluster generally has high CAL surrounded by also high CAL. Outer London on the other hand has lower CAL and surrounded by low CAL grids. Good local connectivity is concentrated in central locations while outer boroughs obtain poorer local connectivity.Those areas are more likely to be car dependent as the local connectivity through walking, cycling and public transit is poor. The middle ring between inner and outer London clusters shows not significant result. A mixture of high and low CAL is present in this ring, implying high potential for planners to direct less infrastructure into the areas to gain higher return in improving local connectivity. 
+
+
+```{r}
+tmap_save(map_cluster, 'LISA_cluster.png')
+```
+
+# CAL per borough
+
+Average CAL will then be measured per borough to identify case study area in this project. And compare between the inner and outer london boroughs. 
+
+Add borough info to each grid. 
+
+```{r}
+CAL_and_PTAL_borough_grid <-  st_join(CAL_and_PTAL, london)
+```
+
+```{r}
+CAL_and_PTAL_borough_grid <- CAL_and_PTAL_borough_grid%>%
+  unique()
+```
+
+```{r}
+CAL_and_PTAL_borough <- CAL_and_PTAL_borough_grid %>%
+  group_by(name)%>%
+  summarize(average_AI=mean(AI,na.rm=TRUE), inner_outer=first(inner_outer))
+```
+```{r}
+tmap_mode("plot")
+
+map_mean_ai = tm_shape(CAL_and_PTAL_borough) +
+  tm_fill(col="average_AI",
+          palette="viridis",
+          title = "average access index",
+          border.alpha = 0) +
+tm_shape(london) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+  tm_layout(bg.color = NA, 
+            legend.position = c(.85,0.05),
+            main.title="Average AI map",
+            main.title.size = 1,
+             frame = FALSE,
+             legend.text.size = 0.7)+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM, GLA, TfL. R package: r5r.", fontface = "italic", position=c(0,0))
+
+map_mean_ai
+```
+```{r}
+tmap_save(map_mean_ai, 'mean_ai_borough.png')
+```
+
+```{r}
+mean_ai_inner_outer <- CAL_and_PTAL_borough %>%
+  group_by(inner_outer) %>%
+  summarise(mean=mean(average_AI, na.rm=TRUE))
+
+mean_ai_inner_outer
+```
+
+
+```{r}
+CAL_and_PTAL_inner <-CAL_and_PTAL_borough%>%
+  filter(inner_outer == "Inner London")
+CAL_and_PTAL_outer <-CAL_and_PTAL_borough%>%
+  filter(inner_outer == "Outer London")
+```
+
+```{r}
+library(ggplot2)
+library(forcats)
+
+bar <- ggplot(CAL_and_PTAL_borough, aes(x = fct_reorder(name, desc(average_AI)), y = average_AI, fill = inner_outer)) + 
+   geom_bar(stat = "identity") + 
+   labs(title = "Average AI in London boroughs by inner and outer boroughs",
+        x = "Borough name", y = "Mean AI") +
+    theme_classic()+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +          # Rotate axis labels
+    coord_fixed(1/30)
+bar
+```
+
+
+```{r}
+png("bar_inner_outer.png")
+print(bar)
+dev.off()
+```
+
+# Objective 3: identify areas of potential using data from PTAL and CAL 
+
+```{r}
+brent <- london%>%
+  filter(name == "Brent")
+brom <- london%>%
+  filter(name == "Bromley")
+```
+
+```{r}
+CAL_and_PTAL_brent <- CAL_and_PTAL_borough_grid%>%
+  filter(name == "Brent")
+```
+
+
+```{r}
+CAL_and_PTAL_brom <- CAL_and_PTAL_borough_grid%>%
+  filter(name == "Bromley")
+```
+
+```{r}
+
+tmap_mode("plot")
+
+map_cal_brent =
+  tm_shape(CAL_and_PTAL_brent) +
+  tm_polygons(col = "CAL",palette=COLOR[2:7],
+          showNA = FALSE,
+          colorNA = 'white',
+          border.alpha = 0,
+          title="") +
+  tm_shape(brent) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(bg.color = NA, 
+          panel.labels = "Cycle Access Level",
+          panel.label.size = 0.8,
+          panel.label.bg.color = NA,
+          frame = FALSE,
+          legend.text.size = 0.7,
+          legend.position = c("right","top"))+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM, GLA, TfL. R package: r5r.", fontface = "italic", position=c(0,0))
+
+map_ptal_brent =
+  tm_shape(CAL_and_PTAL_brent) +
+  tm_polygons(col = "PTAL2015",palette=COLOR,
+          showNA = FALSE,
+          colorNA = 'white',
+          border.alpha = 0,
+          title="") +
+  tm_shape(brent) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(bg.color = NA, 
+          panel.labels = "Public Transport Access Level",
+          panel.label.size = 0.8,
+          panel.label.bg.color = NA,
+          frame = FALSE,
+          legend.text.size = 0.7,
+          legend.position = c("right","top"))+
+  tm_credits("Data source: TfL.", fontface = "italic", position=c(0,0))
+
+
+t <- tmap_arrange(map_cal_brent, map_ptal_brent, ncol =2,asp = 1)
+t
+```
+```{r}
+tmap_save(t, 'brent_cal_ptal.png')
+```
+
+
+
+```{r}
+
+tmap_mode("plot")
+
+map_cal_brom =
+  tm_shape(CAL_and_PTAL_brom) +
+  tm_polygons(col = "CAL",palette=COLOR,
+          showNA = FALSE,
+          colorNA = 'white',
+          border.alpha = 0,
+          title="") +
+  tm_shape(brom) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(bg.color = NA, 
+          panel.labels = "Cycle Access Level",
+          panel.label.size = 0.8,
+          panel.label.bg.color = NA,
+            frame = FALSE,
+           legend.text.size = 0.7,
+            legend.position = c("right","bottom"))+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM, GLA, TfL. R package: r5r.", fontface = "italic", position=c(0,0))
+
+map_ptal_brom =
+  tm_shape(CAL_and_PTAL_brom) +
+  tm_polygons(col = "PTAL2015",palette=COLOR,
+          showNA = FALSE,
+          colorNA = 'white',
+          border.alpha = 0,
+          title="") +
+  tm_shape(brom) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+tm_layout(bg.color = NA, 
+          panel.labels = "Public Transport Access Level",
+          panel.label.size = 0.8,
+          panel.label.bg.color = NA,
+            frame = FALSE,
+            legend.text.size = 0.7,
+          legend.position = c("right","bottom"))+
+  tm_credits("Data source: TfL.", fontface = "italic", position=c(0,0))
+
+
+t2 <- tmap_arrange(map_cal_brom, map_ptal_brom, ncol =2,asp = 1)
+t2
+```
+```{r}
+tmap_save(t2, 'bromley_cal_ptal.png')
+```
+
+
+```{r}
+quadrant.map_4236<-quadrant.map%>%
+  st_transform(.,4326)
+
+CAL_PTAL_cluster_brent <-  st_join(quadrant.map_4236, london)%>%
+  filter(name == "Brent")
+
+
+CAL_PTAL_cluster_brom <-  st_join(quadrant.map_4236, london)%>%
+  filter(name == "Bromley")
+
+```
+
+
+Then find the areas with high-high values for CAL's AI and areas with PTAL2015 is 0 to 2. 
+
+```{r}
+lowptal <- c( "0", "1a", "1b", "2")
+highptal <- c( "6b","6a","5","4")
+
+CAL_PTAL_cluster_brent <- CAL_PTAL_cluster_brent %>%
+  mutate(AoI = case_when(PTAL2015 %in% unlist(lowptal) & cluster == "high-high" ~ 1, 
+                         TRUE ~ NA))
+
+AoI_brent = tm_shape(CAL_PTAL_cluster_brent) +
+  tm_polygons(col = "AoI",
+          palette="red",
+          showNA = FALSE,
+          colorNA = 'white',
+          labels = "Area with low PTAL and high CAL",
+          border.alpha = 0,
+          title="")+
+  tm_shape(brent) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+ tm_layout(bg.color = NA, 
+            panel.labels = "Area of interest (Brent)",
+          panel.label.size = 0.8,
+          panel.label.bg.color = NA,
+            frame = FALSE,
+            legend.text.size = 0.7,
+          legend.position = c("left","top"))+
+   tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03))
+
+CAL_PTAL_cluster_brom <- CAL_PTAL_cluster_brom %>%
+  mutate(AoI = case_when(PTAL2015 %in% unlist(highptal) & cluster == "low-low" ~ 1, 
+                         TRUE ~ NA))
+
+AoI_brom = tm_shape(CAL_PTAL_cluster_brom) +
+  tm_polygons(col = "AoI",
+          palette="blue",
+          showNA = FALSE,
+          colorNA = 'white',
+          labels = "Area with high PTAL and low CAL",
+          border.alpha = 0,
+          title="")+
+  tm_shape(brom) +
+  tm_polygons(col = NA, 
+              alpha = 0)+ 
+  tm_layout(bg.color = NA, 
+            panel.labels = "Area of interest (Bromley)",
+          panel.label.size = 0.8,
+          panel.label.bg.color = NA,
+            frame = FALSE,
+            legend.text.size = 0.7,
+          legend.position = c("left","top"))+
+   tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03))
+
+t_AoI = tmap_arrange(AoI_brent, AoI_brom, ncol = 2, asp=1)
+t_AoI
+```
+
+```{r}
+tmap_save(t_AoI, 'brent_bromley_aoi.png')
+```

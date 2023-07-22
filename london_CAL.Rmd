@@ -63,10 +63,6 @@ After establishing the route networks, the pre-processed origin and destination 
 origin_sf <- fread(file.path("input/origin.csv"))%>%
   st_as_sf(.,coords = c("lat", "lon"), crs = 4326)%>%
   select("id","AI2015","PTAL2015","geometry")
-
-destin_sf <- fread(file.path("input/destination.csv"))%>%
-  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)%>%
-  select("id","bus_stop","amenities","stations","geometry")
 ```
 
 Since this file is for Camden only,  select the points in Camden by GSS_CODE = E09000007, and then map the points on map to check if they are in the correct. Since it is now data frame with lat lon info, the point data will be converted to sf object for easy mapping. 
@@ -83,26 +79,12 @@ Spatial clipping to ensure all POIs are within the london boundary.
 
 ```{r}
 origin_sf <- origin_sf[london,]
-destin_sf <- destin_sf[london,]
-```
-
-```{r}
-# convert character in the dataset to boolean values
-destin_sf$bus_stop <- destin_sf$bus_stop%>%
-  as.logical(.)
-destin_sf$amenities <- destin_sf$amenities%>%
-  as.logical(.)
-destin_sf$stations <- destin_sf$stations%>%
-  as.logical(.)
 ```
 
 r5r requires the id of points to be in character, not integer.. 
 
 ```{r}
 origin_sf$id <- origin_sf$id%>%
-  as.character(.)
-
-destin_sf$id <- destin_sf$id%>%
   as.character(.)
 ```
 
@@ -112,6 +94,7 @@ towncentres <- st_read(here::here("data/Data_Loubna/Data/centres/CentresPROJECTE
   select("borough","classification","designation","objectid","planningauthority","sitename")%>%
   st_transform(4326)
 ```
+
 ```{r}
 st_centroid_within_poly <- function (poly) {
 
@@ -161,22 +144,6 @@ tm_shape(london) +
 ```
 
 ## 3. routing and travel time prediction
-
-```{r}
-tmap_mode("plot")
-
-data_point =  
-tm_shape(destin_sf) +
-  tm_dots(col="red", title = "") +
-  tm_layout(frame = FALSE, bg.color = NA)+
-  tm_compass(position=c(0,0.1)) + 
-  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
-  tm_credits("Data source: OSM", fontface = "italic", position=c(0,0))+
-tm_shape(london) +
-  tm_polygons(col = NA, alpha = 0, title ="")
-
-data_point
-```
 
 Before calculating the travel time, some parameters are set. Note the departure data depends on the service calendar file in the GTFS zip file. The file (data downloaded using codes in additional_data_processing.rmd) stores the service frequency data from 2023-05-22 to 2023-12-23. 
 
@@ -297,6 +264,7 @@ tm_shape(london) +
 aver_wait_time_by_origin
 ```
 
+# WP2: parking time estimates
 
 ```{r}
 cid_parking = get_cid_points(type = "cycle_parking")  # select parking point data from the database
@@ -386,7 +354,11 @@ ttm_park_index<-ttm_park_index%>%
 
 ttm_park_index_df <- ttm_park_index%>%
    st_drop_geometry()
+```
 
+# WP3: CAL conversion 
+
+```{r}
 TAT_bike_park <- TAT_bike%>%
   left_join(.,ttm_park_index_df, join_by("to_id"=="from_id"))
 ```
@@ -407,7 +379,6 @@ sum(is.na(ttm_all$TAT_walk))
 ```{r}
 #the number of OD pairs that are not reachable by bike or through bike + PT. (can be accessed only by walking)
 sum(is.na(ttm_all$TAT_bike))
-
 ```
 
 ```{r}
@@ -436,46 +407,63 @@ colnames(ttm_all_test)
 ```{r}
 ttm_all_ai <- ttm_all_test %>%
   select("from_id","EDF", "geometry")
-
-ttm_all_ai <- ttm_all_ai %>%
-  group_by(from_id)%>%
-  summarize(AI=0.5*max(EDF)+0.5*sum(EDF))
-
 ```
+
+# export the data into csv
 
 ```{r}
-library(tmap)
- 
-tmap_mode("plot")
-map_AI_w_parking =
-  tm_shape(ttm_all_ai) +
-  tm_dots(col = "AI",palette="-viridis",
-          n = 6,
-          style = "equal",
-          scale = 3, 
-          showNA = FALSE,
-          colorNA = 'white',
-          legend.hist = TRUE,
-          title = "Access Index",) +
-tm_shape(london) +
-  tm_polygons(col = NA, 
-              alpha = 0)+ 
-tm_layout(title="AI with parking time",
-             frame = FALSE,
-             legend.outside = TRUE,
-             legend.text.size = 1,
-             legend.hist.size = 1,
-             legend.hist.width = 0.75)
-
-
-map_AI_w_parking
+st_write(ttm_all_ai, "london_edf.csv", package="sf")
 ```
 
-
+Then the conversion to CAL from EDF is calculated in another file names EDF_to_CAL.Rmd due to the memory span in this file is not enough for the calculation.  
 
 ---
 
+
+---
+# Alternative method (more time consuming)
+
 Another option of measuring travel time to key amenities and PT station points individually, which is more intensive. (dont run)
+
+## 2. read in alternative destination point data 
+
+```{r}
+destin_sf <- fread(file.path("input/destination.csv"))%>%
+  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)%>%
+  select("id","bus_stop","amenities","stations","geometry")
+
+destin_sf <- destin_sf[london,]
+
+# convert character in the dataset to boolean values
+destin_sf$bus_stop <- destin_sf$bus_stop%>%
+  as.logical(.)
+destin_sf$amenities <- destin_sf$amenities%>%
+  as.logical(.)
+destin_sf$stations <- destin_sf$stations%>%
+  as.logical(.)
+
+destin_sf$id <- destin_sf$id%>%
+  as.character(.)
+```
+
+  
+```{r}
+tmap_mode("plot")
+
+data_point =  
+tm_shape(destin_sf) +
+  tm_dots(col="red", title = "") +
+  tm_layout(frame = FALSE, bg.color = NA)+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM", fontface = "italic", position=c(0,0))+
+tm_shape(london) +
+  tm_polygons(col = NA, alpha = 0, title ="")
+
+data_point
+```
+
+## 3. routing and travel time prediction
 
 ```{r}
 # estimate travel time matrix for walk
@@ -567,7 +555,7 @@ TAT_by_origin =
   tm_dots(col = "average_TAT",palette="YlOrBr",scale = 3, colorNA = 'white', showNA = FALSE) +
 tm_shape(destin_sf_stati) +
   tm_dots(col = "blue",alpha=0.5)+
-tm_shape(London) +
+tm_shape(london) +
   tm_polygons(col = NA, alpha = 0)
 
 TAT_by_origin
@@ -594,7 +582,7 @@ aver_wait_time_by_origin =
   tm_dots(col = "average_wait",palette="YlOrBr",scale = 3, colorNA = 'white', showNA = FALSE) +
 tm_shape(destin_sf_stati) +
   tm_dots(col = "blue",alpha=0.5)+
-tm_shape(London) +
+tm_shape(london) +
   tm_polygons(col = NA, alpha = 0)
 
 aver_wait_time_by_origin
@@ -624,7 +612,7 @@ tmap_mode("plot")
 map_demand = 
 tm_shape(bike_destin) +
   tm_dots(size=1,col="count",palette="RdYlBu",alpha=0.6)+
-tm_shape(London)+
+tm_shape(london)+
   tm_polygons(col=NA,alpha=0)
 
 map_demand
@@ -656,7 +644,7 @@ tmap_mode("plot")
 map_parking =
 tm_shape(cid_parking) +
   tm_dots(size=0.05,col="PRK_CPT",palette="RdYlBu",style = "jenks", n=6)+
-tm_shape(London)+
+tm_shape(london)+
   tm_polygons(col=NA,alpha=0)
 
 map_parking
@@ -745,7 +733,7 @@ tmap_mode("plot")
 map_park_index = 
 tm_shape(ttm_park_index) +
   tm_dots(size = 0.05, col = "park_index",palette="-RdYlBu", style = "quantile", n=6) +
-tm_shape(London) +
+tm_shape(london) +
   tm_polygons(col = NA, alpha = 0)
 
 t4 = tmap_arrange(map_park_index,map_parking,nrow=1)
@@ -907,7 +895,7 @@ map_AI_w_parking =
 tm_shape(destin_sf_ameni) +
   tm_dots(col = "blue",
           alpha=0.5)+
-tm_shape(London) +
+tm_shape(london) +
   tm_polygons(col = NA, 
               alpha = 0)+ 
   tm_layout(title="AI with parking time",
@@ -961,7 +949,7 @@ map_AI_wo_parking =
 tm_shape(destin_sf_ameni) +
   tm_dots(col = "blue",
           alpha=0.5)+
-tm_shape(London) +
+tm_shape(london) +
   tm_polygons(col = NA, 
               alpha = 0)+
   tm_layout(title="AI without parking time",
@@ -998,279 +986,6 @@ When parking time is not considered in the CAL on the right, the accessibility i
 tmap_save(t5, 'draft_output.png')
 ```
 
-
-# export the data into csv
-```{r}
-colnames(ttm_all_ai_grid)
-```
-
-```{r}
-band1 <- 982
-band2 <- 1543
-band3 <- 2104
-band4 <- 2664
-band5 <- 3225
-
-AI_to_CAL <- ttm_all_ai_grid %>%
-  select("from_id", "AI", "geometry","X", "Y")%>%
-  mutate(CAL = case_when(AI < band1 ~ "1",
-                         AI > band1 & AI < band2  ~ "2",
-                         AI > band2 &  AI < band3  ~ "3",
-                         AI > band3 &  AI < band4  ~ "4",
-                         AI > band4 &  AI < band5  ~ "5",
-                         AI > band5 ~ "6",
-                         TRUE ~ "0"))
-
-```
-
-
-
-```{r}
-library(tmap)
- 
-tmap_mode("plot")
-map_cal =
-  tm_shape(AI_to_CAL) +
-  tm_polygons(col = "CAL",palette="-viridis",
-          showNA = FALSE,
-          colorNA = 'white',
-          title = "cycle access level",
-          border.alpha = 0) +
-tm_shape(destin_cam_sf_ameni) +
-  tm_dots(col = "blue",
-          alpha=0.5)+
-tm_shape(camden) +
-  tm_polygons(col = NA, 
-              alpha = 0)+ 
-  tm_layout(title="CAL",
-             frame = FALSE,
-             legend.outside = TRUE,
-             legend.text.size = 1,
-             legend.hist.size = 1,
-             legend.hist.width = 0.75)
-
-
-map_cal
-```
-
-```{r}
-st_write(AI_to_CAL, "case_camden.csv", package="sf")
-```
-
-# spatial autocorrelation 
-
-Areas with high accessibility can be also influential to their surrounding locations. People living in the grid close to high AI values can also enjoy the good proximity and accessibility through sustainable transport. Hence, spatial autocorrelation of the CAL or AI values will be assessed to see if there is any cluster of such places that could be the ideal locations for cycle infrastructure investment and new housing development projects.  
-
-## Moran's I
-
-- Spatial weight matrix 
-
-```{r}
-#install.packages(spdep)
-library(spdep)
-
-coordsW <- ttm_all_ai_grid%>%
-  filter(AI > 0)%>%  # deselect NA values of access index for weight matrix.
-  st_centroid()%>%
-  st_geometry()%>%
-  st_transform(.,27700)
-
-ttm_all_ai_grid_27700 <- ttm_all_ai_grid%>%
-    filter(AI > 0)%>%
-  st_transform(.,27700)
-
-nb <- ttm_all_ai_grid_27700%>%
-  poly2nb(., queen=FALSE) #produce a neighbours list based on regions with contiguous boundaries
-
-#plot them
-plot(nb, st_geometry(coordsW), col="red")
-```
-
-```{r}
-listw <- nb2listw(nb)
-listw
-```
-
-- Computing the Global Moran’s I
-
-```{r}
-globalMoran <- moran.test(ttm_all_ai_grid_27700$AI, listw)
-globalMoran
-
-I <- globalMoran[["estimate"]][["Moran I statistic"]]
-I
-pvalue <- globalMoran[["p.value"]]
-pvalue
-```
-
-Global morans I statistic is 0.638 with p value close to 0. The p-value is statistically significant, and the z-score is positive. This reveals that the Access index is not randomly distributed among the features in Camden and the AI is clustered with similar values. 
-
-To see the location of the hot spots, local morans i can be measured for each grid. This project includes codes that are adapted from https://rpubs.com/quarcs-lab/spatial-autocorrelation. 
-
-Local spatial autocorrelation
-
-```{r}
-moran <- moran.plot(ttm_all_ai_grid_27700$AI, listw = nb2listw(nb, style = "W"))
-```
-- Compute local Moran
-
-```{r}
-local <- localmoran(x = ttm_all_ai_grid_27700$AI, listw = nb2listw(nb, style = "W"))
-
-moran.map <- cbind(ttm_all_ai_grid_27700, local)
-
-tm_shape(moran.map) +
-  tm_fill(col = "Ii",
-          style = "quantile",
-          title = "local moran statistic") +
-  tm_layout(title="local morans I",
-             frame = FALSE,
-             legend.outside = TRUE,
-            legend.text.size = 1,
-             legend.hist.size = 1,
-             legend.hist.width = 0.75)
-```
-
-[interpretation]
-
-- Plot LISA clusters
-
-```{r}
-quadrant <- vector(mode="numeric",length=nrow(local))
-
-# centers the variable of interest around its mean
-m.AI <- ttm_all_ai_grid_27700$AI - mean(ttm_all_ai_grid_27700$AI)     
-
-# centers the local Moran's around the mean
-m.local <- local[,1] - mean(local[,1])    
-
-# significance threshold
-signif <- 0.1 
-
-# builds a data quadrant
-quadrant[m.AI >0 & m.local>0] <- 4  
-quadrant[m.AI <0 & m.local<0] <- 1      
-quadrant[m.AI <0 & m.local>0] <- 2
-quadrant[m.AI >0 & m.local<0] <- 3
-quadrant[local[,5]>signif] <- 0   
-
-
-quadrant.map <- cbind(ttm_all_ai_grid_27700, quadrant)
-
-quadrant.map <- quadrant.map %>%
-  mutate(cluster = case_when(quadrant == 0 ~ "insignificant",
-                             quadrant == 1 ~ "low-low",
-                             quadrant == 2 ~ "low-high",
-                             quadrant == 3 ~ "high-low",
-                             quadrant == 4 ~ "high-high"))
-
-cluster.map <- quadrant.map%>%
-  select("geometry","cluster")
-```
-
-```{r}
-brks <- c(0,1,2,3,4)
-colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
-plot(cluster.map,
-     border="lightgray",
-     col=colors[findInterval(quadrant,brks,all.inside=FALSE)])
-legend("bottomleft", legend = c("insignificant","low-low","low-high","high-low","high-high"),
-       fill=colors,bty="n")
-```
-
-
-
-# Objective 3: identify areas of potential using data from PTAL and CAL 
-
-Map AI from PTAL. (Admittedly, the current comparison between PTAL and CAL is less convincing since the PTAL is the scored index at London level and the CAL for now only estimated within Camden's boundary. The CAL estimated for London will be comparable to PTAL. However, this file is for the testing purpose of the method and codes, so the following code will proceed.)
-
-```{r}
-origin_cam_sf_grid <- origin_cam_sf%>%
-  st_drop_geometry()%>%
-  left_join(.,camden_grid,by= join_by("id"=="OBJECTID"))%>%
-  st_as_sf(., crs = 4326)
-```
-
-```{r}
-
-tmap_mode("plot")
-PTAL_AI = 
-  tm_shape(origin_cam_sf_grid) +
-  tm_polygons(col = "AI2015",
-          palette="-viridis",
-          n = 6,
-          style = "equal",
-          scale = 3, 
-          showNA = FALSE,
-          colorNA = 'white',
-          legend.hist = TRUE,
-          title = "Access Index",
-          border.alpha = 0) +
-tm_shape(destin_cam_sf_ameni) +
-  tm_dots(col = "blue",
-          alpha=0.5)+
-tm_shape(camden) +
-  tm_polygons(col = NA, 
-              alpha = 0)+
-  tm_layout(title="AI 2015 (PTAL)",
-             frame = FALSE,
-             legend.outside = TRUE,
-             legend.text.size = 1,
-             legend.hist.size = 1,
-             legend.hist.width = 0.75)
-  
-
-PTAL_AI
-```
-The output clearly shows the difference between north and south of the borough. This is largely due to the Euston and Kings Cross areas have higher density of destinations. 
-
-```{r}
-origin_cam_sf_grid_1 <-origin_cam_sf_grid%>%
-  select("ID","AI2015","PTAL2015")%>%
-  st_drop_geometry()
-
-origin_cam_sf_grid_1$ID <- origin_cam_sf_grid_1$ID%>%
-  as.character(.)
-
-ptal_cal <- left_join(
-  quadrant.map,
-  origin_cam_sf_grid_1,
-  by = join_by("from_id"=="ID"))
-
-colnames(ptal_cal)
-```
-```{r}
-ptal_cal<-ptal_cal%>%
-  select("from_id", "AI", "cluster", "AI2015", "PTAL2015", "geometry")
-```
-
-Then find the areas with high-high values for CAL's AI and areas with PTAL2015 is 0 to 2. 
-
-```{r}
-lowptal <- c( "0", "1a", "1b", "2")
-
-ptal_cal <- ptal_cal %>%
-  mutate(AoI = case_when(PTAL2015 %in% unlist(lowptal) & cluster == "high-high" ~ 1, 
-                         TRUE ~ NA))
-
-AoI = tm_shape(ptal_cal) +
-  tm_polygons(col = "AoI",
-          palette="red",
-          showNA = FALSE,
-          colorNA = 'white',
-          title = "Area with low PTAL and high CAL",
-          border.alpha = 0)+
-tm_shape(camden) +
-  tm_polygons(col = NA, 
-              alpha = 0)+
-  tm_layout(title="Area of Interest",
-             frame = FALSE,
-             legend.outside = TRUE,
-             legend.text.size = 1,
-             legend.hist.size = 1,
-             legend.hist.width = 0.75)
-AoI
-```
 
 
 After processing, remove r5r_core in the environment to avoid taking up memories. 
