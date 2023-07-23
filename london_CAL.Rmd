@@ -4,7 +4,9 @@ output: html_document
 date: "2023-07-13"
 ---
 
-This is the London level CAL calculation. Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
+This is the London level CAL calculation (from raw data to travel time estimates to EDF). Since the data folder is too large to upload on GitHub, shared links of the used data are attached accordingly with data source stated in this rmd. 
+
+EDF to CAL conversion and further analysis using the CAL result can be found in the EDF_to_CAL.Rmd. 
 
 ```{r}
 # to increase available memory to java for r5r to 20GB

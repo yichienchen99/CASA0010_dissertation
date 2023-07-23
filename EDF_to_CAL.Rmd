@@ -35,22 +35,27 @@ N = 6
 ```
 
 ```{r}
-band1 <- MAX/N
+band1 <- MAX/(2*N)
+band1.5 <- MAX/N
 band2 <- 2*MAX/N
 band3 <- 3*MAX/N
 band4 <- 4*MAX/N
 band5 <- 5*MAX/N
+band6 <- MAX - (MAX/(2*N))
 ```
 
 
 ```{r}
 AI_to_CAL <- ttm_all_ai %>%
-  mutate(CAL = case_when(AI < band1 ~ "1",
-                         AI > band1 & AI < band2  ~ "2",
+  mutate(CAL = case_when(AI < band1 ~ "1a",
+                         AI > band1 & AI < band1.5  ~ "1b",
+                         AI > band1.5 & AI < band2  ~ "2",
                          AI > band2 &  AI < band3  ~ "3",
                          AI > band3 &  AI < band4  ~ "4",
                          AI > band4 &  AI < band5  ~ "5",
-                         AI > band5 ~ "6",
+                         AI > band5 &  AI < band6  ~ "6a",
+                         AI > band6 ~ "6b",
+                         is.na(AI)~ "0",
                          TRUE ~ "0"))
 
 ```
@@ -141,7 +146,7 @@ Why there are so many NA values. Even areas of high accessibility potentially ha
 ```{r}
 COLOR = c('white','#fde725',"#7ad151", "#22a884", "#2a788e", "#414487", "#440154")
 # this is just the Viridis colour code from https://waldyrious.net/viridis-palette-generator/ with white as the initial colour for NA/0 values
-Labels_CAL = c('0: missing values', '1: least accessible','2','3','4','5','6: most accessible')
+Labels_CAL = c('0: missing values', '1a: least accessible','1b','2','3','4','5','6a','6b: most accessible')
 
 tmap_mode("plot")
 
@@ -172,6 +177,12 @@ map_cal
 
 ```{r}
 tmap_save(map_cal, 'london_cal.png')
+```
+
+```{r}
+set_band <- CAL_and_PTAL%>%
+  group_by(CAL)%>%
+  summarise(count_cal = n(), average_ai = mean(AI))
 ```
 
 
@@ -210,6 +221,19 @@ map_ptal
 ```{r}
 tmap_save(map_ptal, 'london_ptal.png')
 ```
+
+
+found it not normal to have different missing values of CAL and PTAL maps.. Trying to understand why here 
+
+```{r}
+sum(is.na(CAL_and_PTAL$CAL))
+
+sum(is.na(CAL_and_PTAL$CAL) & is.na(CAL_and_PTAL$PTAL2015))
+
+sum(is.na(CAL_and_PTAL$PTAL2015))
+```
+
+but the result seems like those missing values should be in the same place, which is not shown by the maps.. 
 
 ## export the data into csv
 
@@ -397,15 +421,15 @@ tmap_mode("plot")
 
 map_mean_ai = tm_shape(CAL_and_PTAL_borough) +
   tm_fill(col="average_AI",
-          palette="viridis",
-          title = "average access index",
+          palette="-viridis",
+          title = "average AI",
           border.alpha = 0) +
 tm_shape(london) +
   tm_polygons(col = NA, 
               alpha = 0)+ 
   tm_layout(bg.color = NA, 
             legend.position = c(.85,0.05),
-            main.title="Average AI map",
+            main.title="Average Access Index map",
             main.title.size = 1,
              frame = FALSE,
              legend.text.size = 0.7)+
@@ -425,14 +449,6 @@ mean_ai_inner_outer <- CAL_and_PTAL_borough %>%
   summarise(mean=mean(average_AI, na.rm=TRUE))
 
 mean_ai_inner_outer
-```
-
-
-```{r}
-CAL_and_PTAL_inner <-CAL_and_PTAL_borough%>%
-  filter(inner_outer == "Inner London")
-CAL_and_PTAL_outer <-CAL_and_PTAL_borough%>%
-  filter(inner_outer == "Outer London")
 ```
 
 ```{r}
