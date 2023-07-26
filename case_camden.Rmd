@@ -62,9 +62,49 @@ After establishing the route networks, the pre-processed origin and destination 
 
 ```{r}
 origin <- fread(file.path("input/origin.csv"))
-
-destin <- fread(file.path("input/destination.csv"))
 ```
+
+
+```{r}
+towncentres <- st_read(here::here("data/Data_Loubna/Data/centres/CentresPROJECTED.gpkg"))%>%
+  select("borough","classification","designation","objectid","planningauthority","sitename")%>%
+  st_transform(4326)
+```
+
+```{r}
+library(dplyr)
+library(purrr)
+
+st_centroid_within_poly <- function (poly) {
+
+  # check if centroid is in polygon
+  centroid <- poly %>% st_centroid() 
+  in_poly <- st_within(centroid, poly, sparse = F)[[1]] 
+
+  # if it is, return that centroid
+  if (in_poly) return(centroid) 
+
+  # if not, calculate a point on the surface and return that
+  centroid_in_poly <- st_point_on_surface(poly) 
+  return(centroid_in_poly)
+}
+
+towncentres_cen <- towncentres  %>% 
+  mutate(lon = map_dbl(geom, ~st_centroid_within_poly(.x)[[1]]),
+         lat = map_dbl(geom, ~st_centroid_within_poly(.x)[[2]]))
+
+towncentres_cen<-towncentres_cen%>%
+  st_drop_geometry()
+
+towncentres_cen<-towncentres_cen%>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+towncentres_cen <- towncentres_cen%>%
+  rename(id = objectid)
+towncentres_cen$id <- towncentres_cen$id%>%
+  as.character(.)
+```
+
 
 Since this file is for Camden only,  select the points in Camden by GSS_CODE = E09000007, and then map the points on map to check if they are in the correct. Since it is now data frame with lat lon info, the point data will be converted to sf object for easy mapping. 
 
@@ -73,24 +113,22 @@ origin_cam_sf <- origin %>%
   filter(gss_code == "E09000007")%>%
   st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
 
-destin_cam_sf <- destin %>%
-  filter(gss_code == "E09000007")%>%
+towncentres_cen_cam <- towncentres_cen %>%
+  filter(planningauthority == "Camden")%>%
+  st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
+
+towncentres_cam <- towncentres %>%
+  filter(planningauthority == "Camden")%>%
   st_as_sf(.,coords = c("lat", "lon"), crs = 4326)
 ```
 
-```{r}
-destin_cam_sf_ameni <- destin_cam_sf %>%
-  filter(amenities == 1)
-
-destin_cam_sf_stati <- destin_cam_sf %>%
-  filter(stations == 1)
-```
 
 Then get the camden boundary for mapping. 
 ```{r}
 london <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
   st_transform(., 4326)
 ```
+
 ```{r}
 london <-london%>%
   mutate(inner_outer = case_when(ons_inner == "F" ~ "Outer London",
@@ -113,9 +151,7 @@ map_context
 
 ```
 
-```{r}
-tmap_save(map_context, 'london_boroughs.png')
-```
+
 
 ```{r}
 camden <- london%>%
@@ -135,10 +171,10 @@ tm_shape(camden) +
   tm_polygons(col = NA, alpha = 0.5) +
 tm_shape(origin_cam_sf) +
   tm_dots(col = "blue") +
-tm_shape(destin_cam_sf_ameni) +
-  tm_dots(col = "red") + 
-tm_shape(destin_cam_sf_stati) +
-  tm_dots(col = "green")
+tm_shape(towncentres_cam) +
+  tm_polygons(col = "red",alpha = 0.5) +
+tm_shape(towncentres_cen_cam) +
+  tm_dots(col = "black", size = 0.3)
 
 t_0
 ```
@@ -210,13 +246,7 @@ r5r requires the id of points to be in character, not integer..
 origin_cam_sf$id <- origin_cam_sf$id%>%
   as.character(.)
 
-destin_cam_sf$id <- destin_cam_sf$id%>%
-  as.character(.)
-
-destin_cam_sf_ameni$id <- destin_cam_sf_ameni$id%>%
-  as.character(.)
-
-destin_cam_sf_stati$id <- destin_cam_sf_stati$id%>%
+towncentres_cen_cam$id <- towncentres_cen_cam$id%>%
   as.character(.)
 ```
 
@@ -226,7 +256,7 @@ Estimate the travel time by walking. This will be the travel time of all the pos
 # estimate travel time matrix for walk
 ttm_walk <- expanded_travel_time_matrix(r5r_core = r5r_core,   
                           origins = origin_cam_sf,
-                          destinations = destin_cam_sf,    
+                          destinations = towncentres_cen_cam,    
                           mode = c("WALK","TRANSIT"),
                           max_walk_time = max_walk_time,
                           max_trip_duration = max_trip_duration,
@@ -240,18 +270,11 @@ head(ttm_walk, n = 10)
 
 The output contains 1,532,790 rows, indicating the amount of valid OD pairs within set time threshold for travel time. 
 
-Similarly, for cycle modes, OD pairs with destination as bus stop will be removed.  
-
-```{r}
-destin_cam_sf_bike <- destin_cam_sf %>%
-  filter(bus_stop == 0)
-```
-
 ```{r}
 # estimate travel time matrix for bike
 ttm_bike <- expanded_travel_time_matrix(r5r_core = r5r_core,   
                           origins = origin_cam_sf,
-                          destinations = destin_cam_sf_bike,    
+                          destinations = towncentres_cen_cam,    
                           mode = c("BICYCLE","TRANSIT"),
                           max_bike_time = max_bike_time,
                           max_trip_duration = max_trip_duration,
@@ -310,8 +333,6 @@ tmap_mode("plot")
 TAT_by_origin =
   tm_shape(TAT_walk_average) +
   tm_dots(col = "average_TAT",palette="YlOrBr",scale = 3, colorNA = 'white', showNA = FALSE) +
-tm_shape(destin_cam_sf_stati) +
-  tm_dots(col = "blue",alpha=0.5)+
 tm_shape(camden) +
   tm_polygons(col = NA, alpha = 0)
 
@@ -337,8 +358,6 @@ tmap_mode("plot")
 aver_wait_time_by_origin =
   tm_shape(TAT_wait_average) +
   tm_dots(col = "average_wait",palette="YlOrBr",scale = 3, colorNA = 'white', showNA = FALSE) +
-tm_shape(destin_cam_sf_stati) +
-  tm_dots(col = "blue",alpha=0.5)+
 tm_shape(camden) +
   tm_polygons(col = NA, alpha = 0)
 
@@ -357,7 +376,7 @@ bike_destin <- ttm_bike %>%
   filter(str_detect(`routes`, "BICYCLE"))%>%
   group_by(to_id)%>%
   summarise(count=n())%>%
-  left_join(.,destin_cam_sf,by= join_by("to_id"=="id"))%>%
+  left_join(.,towncentres_cen_cam,by= join_by("to_id"=="id"))%>%
     st_as_sf(., crs = 4326)
 ```
 
@@ -436,7 +455,7 @@ Then estimate travel time between destinations (PT stations and key amenities) a
 ```{r}
 # estimate travel time matrix for walk
 ttm_park <- travel_time_matrix(r5r_core = r5r_core,   
-                          origins = destin_cam_sf,
+                          origins = towncentres_cen_cam,
                           destinations = cid_parking_cam,    
                           mode = c("bicycle"),
                           max_bike_time = max_bike_time_park,
@@ -649,7 +668,7 @@ map_AI_w_parking =
           legend.hist = TRUE,
           title = "Access Index",
           border.alpha = 0) +
-tm_shape(destin_cam_sf_ameni) +
+tm_shape(towncentres_cen_cam) +
   tm_dots(col = "blue",
           alpha=0.5)+
 tm_shape(camden) +

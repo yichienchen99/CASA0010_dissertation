@@ -15,6 +15,7 @@ library(stringr)
 library(spdep)
 ```
 
+
 ## EDF to AI 
 
 ```{r}
@@ -59,6 +60,17 @@ AI_to_CAL <- ttm_all_ai %>%
                          TRUE ~ "0"))
 
 ```
+
+```{r}
+band1
+band1.5
+band2
+band3
+band4
+band5
+band6
+```
+
 
 ## merge ptal data
 
@@ -144,7 +156,7 @@ Why there are so many NA values. Even areas of high accessibility potentially ha
 # map CAL and PTAL for London 
 
 ```{r}
-COLOR = c('white','#fde725',"#7ad151", "#22a884", "#2a788e", "#414487", "#440154")
+COLOR = c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154")
 # this is just the Viridis colour code from https://waldyrious.net/viridis-palette-generator/ with white as the initial colour for NA/0 values
 Labels_CAL = c('0: missing values', '1a: least accessible','1b','2','3','4','5','6a','6b: most accessible')
 
@@ -289,7 +301,7 @@ pvalue <- globalMoran[["p.value"]]
 pvalue
 ```
 
-Global morans I statistic is 0.638 with p value close to 0. The p-value is statistically significant, and the z-score is positive. This reveals that the Access index is not randomly distributed among the features in Camden and the AI is clustered with similar values. 
+Global morans I statistic is 0.9368 with p value close to 0. The p-value is statistically significant, and the z-score is positive. This reveals that the Access index is not randomly distributed among the features in Camden and the AI is clustered with similar values. 
 
 To see the location of the hot spots, local morans i can be measured for each grid. This project includes codes that are adapted from https://rpubs.com/quarcs-lab/spatial-autocorrelation. 
 
@@ -493,12 +505,14 @@ CAL_and_PTAL_brom <- CAL_and_PTAL_borough_grid%>%
 ```
 
 ```{r}
+COLOR = c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154")
+
 
 tmap_mode("plot")
 
 map_cal_brent =
   tm_shape(CAL_and_PTAL_brent) +
-  tm_polygons(col = "CAL",palette=COLOR[2:7],
+  tm_polygons(col = "CAL",palette=COLOR[2:9],
           showNA = FALSE,
           colorNA = 'white',
           border.alpha = 0,
