@@ -1,0 +1,306 @@
+---
+title: "1_data_processing"
+output: html_document
+date: "2023-05-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data input to use r5r package is processed in this file. 
+
+To use r5r, data input contains: 
+- OD points in .csv(mandatory) 
+- A road network data set from OpenStreetMap in .pbf format (mandatory) 
+- A public transport feed in GTFS.zip format (optional) 
+- A raster file of Digital Elevation Model data in .tif format (optional)
+
+## load packages
+
+```{r}
+library(sf)
+library(here)
+library(tmap)
+library(tmaptools)
+library(stringr)
+library(spatstat)
+library(janitor)
+library(dplyr)
+library(tidyverse)
+library(data.table)
+library(rgdal)
+library(osmextract)
+```
+
+# ----------------------OD points----------------------
+
+This section clean and process OD data for the r5r input. 
+Origin points are the PTAL grid centroids.
+Destination points are the town centre centroids. 
+
+r5r requires either a POINT sf object with WGS84 CRS, or a data.frame containing the columns id, lon and lat. So the projection will be set as EPSG4326..
+
+# origin 
+
+## read in data
+
+```{r}
+PTAL_grid <- read.csv(here::here("data/2015_PTALs_Grid_Values_280515.csv"), 
+                         header = TRUE, sep = ",",  
+                         encoding = "latin1")
+```
+
+```{r}
+summary(PTAL_grid)
+```
+
+## organise the data type and format
+
+The original lon and lat variables seem like in EPSG 27700 (british national grid), to convert this into WGS84 / EPSG 4326, we first convert the float values to geometry points. Then we can reproject the data into ideal projection. When necessary, we can also convert the geometry points to two separate columns of lon and lat. 
+
+```{r}
+tosf <- PTAL_grid%>%
+  st_as_sf(., coords = c("X", "Y"), 
+                   crs = 27700)
+```
+
+```{r}
+to84 <- tosf %>%
+    st_transform(., 4326)
+```
+
+## simple mapping to check
+
+To check if the conversion is correct, map the points. 
+
+```{r}
+## read in geo boundaries
+London_borough <- st_read(here::here("data/London_Boroughs.gpkg"))%>%
+    st_transform(., 4326)
+
+## map
+tmap_mode("plot")
+tm_shape(London_borough) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(to84) +
+  tm_dots(col = "red")
+```
+
+Seems good, it can also be zoomed in to further check. 
+
+## add a borough name column
+
+assign each points with their borough name through spatial join. 
+
+```{r}
+PTAL_grid_boroughname <- to84 %>%
+  st_join(London_borough)
+```
+
+## delete unnecessary info & lat and lon
+
+Delete points outside london boroughs and columns that will not be used. 
+Since the geometry of the points are not in the format required by r5r, the geometry column needs to be transformed.
+
+```{r}
+PTAL_grid_latlon <- PTAL_grid_boroughname %>%
+  rename("id" = "ID")%>%
+  select(id, AI2015, PTAL2015, name, gss_code, ons_inner, sub_2011, geometry) %>%
+  extract(geometry, c('lat', 'lon'), '\\((.*), (.*)\\)', convert = TRUE) 
+```
+
+## town centres  
+
+```{r}
+towncentres <- st_read(here::here("data/CentresPROJECTED.gpkg"))%>%
+  select("objectid","borough","classification")%>%
+  st_transform(4326)
+```
+
+```{r}
+st_centroid_within_poly <- function (poly) {
+
+  # check if centroid is in polygon
+  centroid <- poly %>% st_centroid() 
+  in_poly <- st_within(centroid, poly, sparse = F)[[1]] 
+
+  # if it is, return that centroid
+  if (in_poly) return(centroid) 
+
+  # if not, calculate a point on the surface and return that
+  centroid_in_poly <- st_point_on_surface(poly) 
+  return(centroid_in_poly)
+}
+
+towncentres_cen <- towncentres  %>% 
+  mutate(lon = map_dbl(geom, ~st_centroid_within_poly(.x)[[1]]),
+         lat = map_dbl(geom, ~st_centroid_within_poly(.x)[[2]]))
+
+towncentres_cen<-towncentres_cen%>%
+  st_drop_geometry()
+
+towncentres_cen<-towncentres_cen%>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+towncentres_cen <- towncentres_cen%>%
+  rename(id = objectid)
+towncentres_cen$id <- towncentres_cen$id%>%
+  as.character(.)
+```
+
+```{r}
+towncentres_cen_latlon <- towncentres_cen %>%
+  extract(geometry, c('lat', 'lon'), '\\((.*), (.*)\\)', convert = TRUE) 
+```
+
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(towncentres) +
+  tm_polygons(col=NA, title = "") +
+  tm_layout(frame = FALSE, bg.color = NA)+
+tm_shape(towncentres_cen) +
+  tm_dots(col="red", title = "") +
+  tm_layout(frame = FALSE, bg.color = NA)+
+  tm_compass(position=c(0,0.1)) + 
+  tm_scale_bar(breaks = c(0, 2, 4),position=c(0,0.03)) +
+  tm_credits("Data source: OSM", fontface = "italic", position=c(0,0))+
+tm_shape(London_borough) +
+  tm_polygons(col = NA, alpha = 0, title ="")
+
+```
+
+## export
+
+This section process the OD pairs. All point data is now in WSG84, with id, lat, lon fields. 
+
+- PTAL_grid_latlon: PTAL centroids with borough names, PTAL values and inner-outer London classification. 
+- Dest_wide_latlon: town centre centroids with borough names. 
+
+Then those files are saved in data directory as csv. 
+
+```{r}
+fwrite(PTAL_grid_latlon, "input\\origin.csv")
+fwrite(towncentres_cen_latlon, "input\\destination.csv")
+```
+
+# ----------------------road network----------------------
+
+OSM data can be sourced from a wide range of channels from geofabrik website to osmextract R package. 
+Note for R package: osmdata is good for smaller case area while osmextract can cope with larger data size. 
+This project uses osmextract for network data since it can select types of road easily. The data source of this package is still geofabrik. 
+
+```{r}
+tags_needed = c("bicycle")
+
+london_net = oe_get(
+  place = "Greater London",
+  layer = "lines", 
+  provider = "geofabrik",
+  force_download = TRUE,
+  force_vectortranslate = TRUE,
+  extra_tags = tags_needed,
+  download_directory ="input/",
+  query = "
+  SELECT osm_id, highway, bicycle, geometry 
+  FROM 'lines' 
+  WHERE highway not IN ('motorway','motorway_link','trunk','trunk_link')" #keep only roads that are allowed to be cycled on.
+)
+
+```
+
+```{r}
+plot(london_net["highway"], key.pos = 1)
+```
+
+
+# ----------------------public transport feed----------------------
+
+London GTFS is in the format of TransXchange data, downloaded from the website: https://www.travelinedata.org.uk/traveline-open-data/traveline-national-dataset/. This website requires the open source software like Filezilla or Core FTP to download the remote TransXchange data zip files to the local directory. (download date: 12 June 2023, followed the instruction in https://citygeographics.org/r5r-workshop/uk-transit-data-transxchange-and-atoc/)
+
+Then the TransXchange data will be converted to gtfs format using UK2GTFS r package. 
+
+```{r}
+#install.packages("remotes")
+remotes::install_github("ITSleeds/UK2GTFS")
+```
+
+```{r}
+library(UK2GTFS)
+library(tidyverse)
+```
+
+It will take a while to convert the downloaded XML files in the zip folder to the ideal gtfs data. 
+
+```{r}
+path_in <- "data/L.zip" #this is the downloaded data of London PT services from TransXchange
+gtfs <- transxchange2gtfs(path_in = path_in,
+ ncores = 4)
+```
+
+Save the converted version of gtfs to input folder under the name London_GTFS. 
+
+```{r}
+gtfs_write(gtfs, 
+           folder = "C:/Users/99/Documents/CASA/Dissertation_data/input", 
+           name = "London_GTFS")
+```
+
+```{r}
+#gtfs <- gtfs_clean(gtfs)
+#gtfs <- gtfs_force_valid(gtfs)
+```
+
+
+# ----------------------elevation----------------------
+
+download elevation using elevatr R package (June 5). 
+
+```{r}
+ldn <-  read_sf("data/London_Boroughs.gpkg")%>%
+    st_transform(., 4326)
+```
+
+```{r}
+elevation <- get_elev_raster(ldn, z = 10)
+```
+
+```{r}
+if (require(rgdal)) {
+ rf <- writeRaster(elevation, filename=file.path("data/london_elev.tif"), format="GTiff", overwrite=TRUE)
+}
+```
+
+```{r}
+elevation
+```
+
+```{r}
+ldn_sp <- as(ldn, "Spatial")
+```
+
+```{r}
+plot(elevation, main="This the downloaded DEM [meters]")
+plot(ldn_sp,col="NA",border="black", add=TRUE)
+text(coordinates(ldn_sp), 
+     col="black", cex=0.20)
+```
+
+```{r}
+elev_crop = crop(elevation, ldn_sp)
+plot(elev_crop, main="Cropped digital elevation model")
+plot(ldn_sp, add=TRUE)
+text(coordinates(ldn_sp), cex=0.2)
+```
+
+```{r}
+crs(elev_crop)
+```
+
+```{r}
+writeRaster(elev_crop, filename="r5rdata/london_elevation.tif", datatype='INT4S', overwrite=TRUE)
+```
+
+
