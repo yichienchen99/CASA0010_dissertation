@@ -67,6 +67,7 @@ grid_small <- grid %>%
   filter(Y > median(Y) - 500 & Y < median(Y) + 500) 
 ```
 
+
 ```{r}
 origin_small <- origin_sf[grid_small,]
 ```
