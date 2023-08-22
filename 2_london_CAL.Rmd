@@ -131,11 +131,19 @@ ttm_walk_simple <- expanded_travel_time_matrix(r5r_core = r5r_core,
                           bike_speed = 13,
                           departure_datetime = departure_datetime,
                           breakdown = TRUE)
+```
 
+
+```{r}
 TAT_walk <- ttm_walk_simple%>%
   mutate(TAT_walk = case_when(!str_detect(`routes`, "WALK") ~ access_time + wait_time,
                     TRUE ~ total_time))%>%
-  select("from_id","to_id","TAT_walk")
+  mutate(access_time2 = case_when(access_time == 0 & wait_time == 0 ~ total_time,
+                                      TRUE ~ access_time))%>% # if only walking, total time rather than access time contains time to walk to the destination, so this step is to make total time for only walking into access time for better clarity. 
+  select("from_id","to_id","access_time2","wait_time","TAT_walk")%>%
+  rename(access_time_walk = access_time2)%>%
+  rename(wait_time_walk = wait_time)
+
 ```
 
 Repeat the same process for cycling mode. 
@@ -152,11 +160,19 @@ ttm_bike_simple <- expanded_travel_time_matrix(r5r_core = r5r_core,
                           bike_speed = 13,
                           departure_datetime = departure_datetime,
                           breakdown = TRUE)
+```
 
+
+```{r}
 TAT_bike <- ttm_bike_simple%>%
   mutate(TAT_bike = case_when(!str_detect(`routes`, "BICYCLE") ~ access_time + wait_time,
                     TRUE ~ total_time))%>%
-  select("from_id","to_id","TAT_bike")
+  mutate(access_time2 = case_when(access_time == 0 & wait_time == 0 ~ total_time,
+                                      TRUE ~ access_time))%>% 
+  select("from_id","to_id","access_time2","wait_time","TAT_bike")%>%
+  rename(access_time_bike = access_time2)%>%
+  rename(wait_time_bike = wait_time)
+
 ```
 
 # Work Package 2: parking time estimates
@@ -264,8 +280,7 @@ ttm_park_index_df$from_id <- ttm_park_index_df$from_id%>%
   as.character(.)
 
 TAT_bike_park <- TAT_bike%>%
-  left_join(.,ttm_park_index_df, join_by("to_id"=="from_id"))%>%
-  select("from_id", "to_id", "TAT_bike", "park_time")
+  left_join(.,ttm_park_index_df, join_by("to_id"=="from_id"))
 
 ttm_all <- full_join(TAT_walk,TAT_bike_park,by=c("from_id","to_id"))
 ```
@@ -273,9 +288,7 @@ ttm_all <- full_join(TAT_walk,TAT_bike_park,by=c("from_id","to_id"))
 ```{r}
 #the number of OD pairs that are not reachable by foot or through walk + PT. (can be accessed only by bike)
 sum(is.na(ttm_all$TAT_walk))
-```
 
-```{r}
 #the number of OD pairs that are not reachable by bike or through bike + PT. (can be accessed only by walking)
 sum(is.na(ttm_all$TAT_bike))
 ```
@@ -287,36 +300,35 @@ summary(ttm_all)
 ```{r}
 ttm_all<- ttm_all%>%
   mutate(park_time2 = case_when(!is.na(park_time) ~ park_time,
-                                !is.na(TAT_bike) & is.na(park_time) ~ 2,
+                                !is.na(TAT_bike) & is.na(park_time) ~ 5,
                                  TRUE ~ NA))%>%
   # this is to avoid na values when the town centres have no valid parking space but it is still possible to cycle there and park the bike less securely. 
-  select("from_id","to_id","TAT_walk", "TAT_bike", "park_time2")%>%
+  select("from_id","to_id","access_time_walk", "wait_time_walk", "TAT_walk", "access_time_bike", "wait_time_bike", "TAT_bike", "park_time2")%>%
   rename("park_time" = "park_time2")
 
 summary(ttm_all)
 ```
 ```{r}
 ttm_all_peak <- ttm_all %>%
-  mutate(access_time = case_when (!is.na(TAT_walk) ~ TAT_walk,
+  mutate(mode_choice = case_when (!is.na(TAT_walk) ~ TAT_walk,
                            !is.na(TAT_bike) ~ TAT_bike + park_time,
                            TRUE ~ TAT_walk))%>%
-  mutate(TAT = case_when (access_time == 0 ~ 0.1,
-                           TRUE ~ access_time)) %>%
-  mutate(EDF = 0.5 * (60 / TAT))%>%
-  select("from_id","to_id","TAT_walk","TAT_bike","park_time","TAT" ,"EDF")
+  mutate(TAT = case_when (mode_choice == 0 ~ 0.1,
+                           TRUE ~ mode_choice)) %>%
+  mutate(EDF = 0.5 * (60 / TAT))
 ```
 
 ```{r}
-ttm_all_ai <- ttm_all_peak %>%
+ttm_ai_peak <- ttm_all_peak %>%
   group_by(from_id)%>%
   summarize(AI=0.5*max(EDF)+0.5*sum(EDF))
 
-summary(ttm_all_ai)
+summary(ttm_ai_peak)
 ```
 ```{r}
-st_write(ttm_all_ai, "london_ai_peak.csv")
+st_write(ttm_ai_peak, "london_ai_peak.csv")
 
-# then the data objects in the environment can be removed to free up space
+# it is recommended to remove the data objects in the environment to free up memory (because the following process will repeat the same above but for off-peak departure time)
 # rm(ttm_walk_simple)
 # rm(ttm_walk_simple_off)
 # rm(ttm_bike_simple)
@@ -343,11 +355,18 @@ ttm_walk_simple_off <- expanded_travel_time_matrix(r5r_core = r5r_core,
                           bike_speed = 13,
                           departure_datetime = departure_datetime_off,
                           breakdown = TRUE)
+```
 
+
+```{r}
 TAT_walk_off <- ttm_walk_simple_off%>%
   mutate(TAT_walk_off = case_when(!str_detect(`routes`, "WALK") ~ access_time + wait_time,
                     TRUE ~ total_time))%>%
-  select("from_id","to_id","TAT_walk_off")
+  mutate(access_time2 = case_when(access_time == 0 & wait_time == 0 ~ total_time,
+                                      TRUE ~ access_time))%>% 
+  select("from_id","to_id","access_time2","wait_time","TAT_walk_off")%>%
+  rename(access_time_walk = access_time2)%>%
+  rename(wait_time_walk = wait_time)
 ```
 
 
@@ -363,11 +382,18 @@ ttm_bike_simple_off <- expanded_travel_time_matrix(r5r_core = r5r_core,
                           bike_speed = 13,
                           departure_datetime = departure_datetime_off,
                           breakdown = TRUE)
+```
 
+
+```{r}
 TAT_bike_off <- ttm_bike_simple_off%>%
   mutate(TAT_bike_off = case_when(!str_detect(`routes`, "BICYCLE") ~ access_time + wait_time,
                     TRUE ~ total_time))%>%
-  select("from_id","to_id","TAT_bike_off")
+  mutate(access_time2 = case_when(access_time == 0 & wait_time == 0 ~ total_time,
+                                      TRUE ~ access_time))%>% 
+  select("from_id","to_id","access_time2","wait_time","TAT_bike_off")%>%
+  rename(access_time_bike = access_time2)%>%
+  rename(wait_time_bike = wait_time)
 ```
 
 merge bike time and park time
@@ -378,8 +404,7 @@ ttm_park_index_df$from_id <- ttm_park_index_df$from_id%>%
   as.character(.)
 
 TAT_bike_park_off <- TAT_bike_off%>%
-  left_join(.,ttm_park_index_df, join_by("to_id"=="from_id"))%>%
-  select("from_id", "to_id", "TAT_bike_off", "park_time")
+  left_join(.,ttm_park_index_df, join_by("to_id"=="from_id"))
 ```
 
 merge walk time
@@ -406,9 +431,9 @@ summary(ttm_all_off)
 ```{r}
 ttm_all_off<- ttm_all_off%>%
   mutate(park_time2 = case_when(!is.na(park_time) ~ park_time,
-                                !is.na(TAT_bike_off) & is.na(park_time) ~ 2,
+                                !is.na(TAT_bike_off) & is.na(park_time) ~ 5,
                                  TRUE ~ NA))%>%
-  select("from_id","to_id","TAT_walk_off", "TAT_bike_off", "park_time2")%>%
+  select("from_id","to_id","access_time_walk", "wait_time_walk", "TAT_walk_off", "access_time_bike", "wait_time_bike", "TAT_bike_off", "park_time2")%>%
   rename("park_time" = "park_time2")
 
 summary(ttm_all_off)
@@ -416,37 +441,34 @@ summary(ttm_all_off)
 
 ```{r}
 ttm_all_offpeak <- ttm_all_off %>%
-  mutate(access_time = case_when (!is.na(TAT_walk_off) ~ TAT_walk_off,
+  mutate(mode_choice = case_when (!is.na(TAT_walk_off) ~ TAT_walk_off,
                            !is.na(TAT_bike_off) ~ TAT_bike_off + park_time,
                            TRUE ~ TAT_walk_off))%>%
-  mutate(TAT = case_when (access_time == 0 ~ 0.1,
-                           TRUE ~ access_time)) %>%
-  mutate(EDF_off = 0.5 * (60 / TAT))%>%
-  select("from_id","to_id","TAT_walk_off","TAT_bike_off","park_time","TAT" ,"EDF_off")
+  mutate(TAT = case_when (mode_choice == 0 ~ 0.1,
+                           TRUE ~ mode_choice)) %>%
+  mutate(EDF_off = 0.5 * (60 / TAT))
 ```
 
 ```{r}
-ttm_all_ai_offpeak <- ttm_all_offpeak %>%
+ttm_ai_offpeak <- ttm_all_offpeak %>%
   group_by(from_id)%>%
   summarize(AI_off=0.5*max(EDF_off)+0.5*sum(EDF_off))
 
-summary(ttm_all_ai_offpeak)
+summary(ttm_ai_offpeak)
 ```
 
 ```{r}
-st_write(ttm_all_ai_offpeak, "london_ai_offpeak.csv")
+st_write(ttm_ai_offpeak, "london_ai_offpeak.csv")
 ```
 
-# export the data into csv
+# combine the AI data at peak and offpeak into one csv for further analysis
 
 ```{r}
-ttm_all_peak <- fread(file.path("london_ai_peak.csv"))%>%
-  select("from_id", "AI")
+ttm_ai_peak <- fread(file.path("london_ai_peak.csv"))
 
-ttm_all_off <- fread(file.path("london_ai_offpeak.csv"))%>%
-  select("from_id","AI_off")
+ttm_ai_offpeak <- fread(file.path("london_ai_offpeak.csv"))
 
-ttm <- full_join(ttm_all_peak,ttm_all_off,by="from_id")
+ttm <- full_join(ttm_ai_peak,ttm_ai_offpeak,by="from_id")
 
 summary(ttm)
 ```
@@ -464,4 +486,32 @@ After processing, remove r5r_core in the environment to avoid taking up memories
 r5r::stop_r5(r5r_core)
 rJava::.jgc(R.gc = TRUE)
 ```
+
+---
+
+
+```{r}
+
+ttm_all_offpeak <- ttm_all_offpeak%>%
+  left_join(.,origin_sf,by= join_by("from_id"=="id"))%>%
+  st_as_sf(crs = 4326)
+
+ttm_all_offpeak_brent <- ttm_all_offpeak[brent,]
+ttm_all_offpeak_brom <- ttm_all_offpeak[brom,]
+
+ttm_all_peak <- ttm_all_peak%>%
+  left_join(.,origin_sf,by= join_by("from_id"=="id"))%>%
+  st_as_sf(crs = 4326)
+
+ttm_all_peak_brent <- ttm_all_peak[brent,]
+ttm_all_peak_brom <- ttm_all_peak[brom,]
+
+st_write(ttm_all_offpeak_brent, "ttm_all_offpeak_brent.csv")
+st_write(ttm_all_offpeak_brom, "ttm_all_offpeak_brom.csv")
+st_write(ttm_all_peak_brent, "ttm_all_peak_brent.csv")
+st_write(ttm_all_peak_brom, "ttm_all_peak_brom.csv")
+
+```
+
+
 

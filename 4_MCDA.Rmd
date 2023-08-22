@@ -1,0 +1,275 @@
+
+# MCDA
+
+This section would be conducted after the 3_london_CAL_cont.Rmd file which identifies the case study borough of Brent and Bromley. This section aims to produce tilted stacked maps (so not MCDA technically) of various attributes to give a context for the CAL result. 
+
+```{r}
+library(osmextract)
+library(elevatr)
+library(raster)
+library(stars)
+library(CycleInfraLnd)
+library(ggnewscale)
+```
+
+The stacked maps include the following attributes for both boroughs: 
+- elevation
+- population density per LSOA
+- cycle parking capacity and location  
+- road network
+
+# load data 
+
+```{r}
+
+ldn <-  read_sf("data/London_Boroughs.gpkg")%>%
+    st_transform(., 4326)
+
+brent <- ldn%>%
+  filter(name == "Brent")
+
+brom <- ldn %>%
+  filter(name =="Bromley")
+
+# elevation
+
+dem <- stars::read_stars(file.path("C:/Users/99/Documents/CASA/dissertation_test/input/london_elevation.tif"), package = "stars")
+dem <- st_as_sf(dem)
+
+dem1 <- dem[brent,]
+dem2 <- dem[brom,]
+
+dem1 <- dem1%>%
+  rename("elevation" = "london_elevation.tif")
+dem2 <- dem2%>%
+  rename("elevation" = "london_elevation.tif")
+  
+# road network (OSM)
+
+roads <- oe_read(
+ file.path("C:/Users/99/Documents/CASA/dissertation_test/input/geofabrik_greater-london-latest.osm.pbf"), layer = "lines")
+
+# crop
+roads1 <- roads[brent,]
+roads1 <- st_crop(roads1, brent)
+plot(roads1['osm_id'])
+
+roads2 <- roads[brom,]
+roads2 <- st_crop(roads2, brom)
+plot(roads2['osm_id'])
+
+roads1 <- roads1 %>%
+  filter(highway == "primary" |highway == "secondary"| highway == "tertiary"| highway == "cycleway")
+
+roads2 <- roads2 %>%
+  filter(highway == "primary" |highway == "secondary"| highway == "tertiary"| highway == "cycleway")
+
+# cycle data 
+
+
+cid_parking <- get_cid_points(type = "cycle_parking")
+
+cid_parking_brent <- cid_parking[brent,]%>%
+  dplyr::select("FEATURE_ID","PRK_CPT","BOROUGH","geometry")%>%
+  mutate(capacity = case_when(PRK_CPT < 10 ~ "1-10",
+                              PRK_CPT >= 10 & PRK_CPT <20 ~ "10-20",
+                              PRK_CPT >= 20 & PRK_CPT <30 ~ "20-30",
+                              PRK_CPT >=30 ~ "30+"))
+
+
+cid_parking_brom <- cid_parking[brom,]%>%
+  dplyr::select("FEATURE_ID","PRK_CPT","BOROUGH","geometry")%>%
+  mutate(capacity = case_when(PRK_CPT < 10 ~ "1-10",
+                              PRK_CPT >= 10 & PRK_CPT <20 ~ "10-20",
+                              PRK_CPT >= 20 & PRK_CPT <30 ~ "20-30",
+                              PRK_CPT >=30 ~ "30+"))
+
+# population 
+
+
+pop_brent <- read.csv(here::here("data/brent_popden_2021lsoa.csv"), 
+                        sep = ",",  header = TRUE, 
+                         encoding = "latin1")%>%
+    dplyr::select("LSOA21code","pop_den")
+
+  
+pop_brom <- read.csv(here::here("data/bromley_popden_2021lsoa.csv"), 
+                        sep = ",",  header = TRUE, 
+                         encoding = "latin1")%>%
+  dplyr::select("LSOA21code","pop_den")
+
+# read in lsoa 2011 code   
+lsoa <- st_read(here::here("data/lsoa_geo_shp/LSOA_2011_London_gen_MHW.shp"))
+
+lsoa <- lsoa %>%
+  st_transform(4236)%>%
+  dplyr::select("LSOA11CD","LSOA11NM","LAD11CD","LAD11NM", "geometry")
+
+# find changes in code from 2011 to 2021
+lsoa22 <- read.csv(here::here("data/lsoa11to22.csv"),sep = ",",  header = TRUE, 
+                         encoding = "latin1")
+lsoa22 <- lsoa22%>%
+  filter(LAD22NM =="Brent" | LAD22NM == "Bromley")%>%
+  filter(LSOA11CD != LSOA21CD)%>%
+  dplyr::select("LSOA11CD", "LSOA21CD")
+
+lsoa_brent <- lsoa%>%
+  filter(LAD11NM == "Brent")%>%
+  left_join(., lsoa22, by = join_by("LSOA11CD" == "LSOA11CD"))%>%
+  mutate(code = case_when(!is.na(LSOA21CD) ~ LSOA21CD,
+                          TRUE~ LSOA11CD))
+lsoa_bromley <- lsoa%>%
+  filter(LAD11NM == "Bromley")%>%
+  left_join(., lsoa22, by = join_by("LSOA11CD" == "LSOA11CD"))%>%
+  mutate(code = case_when(!is.na(LSOA21CD) ~ LSOA21CD,
+                          TRUE~ LSOA11CD))
+
+#join by new code
+pop_brent <- lsoa_brent%>%
+  left_join(.,pop_brent, by = join_by( "code" == "LSOA21code"))
+pop_brom <- lsoa_bromley%>%
+  left_join(.,pop_brom, by = join_by("code" == "LSOA21code"))
+
+pop_brent<-pop_brent%>%
+  dplyr::select("code", "pop_den","geometry")
+pop_brom<-pop_brom%>%
+  dplyr::select("code", "pop_den","geometry")
+
+pop_brent <- pop_brent%>%
+  rename("population_density"= "pop_den")
+pop_brom <- pop_brom%>%
+  rename("population_density"= "pop_den")
+
+plot(pop_brent)
+plot(pop_brom)
+
+```
+This tilted stacked map is produced with credit to the code here: https://www.urbandemographics.org/post/figures-map-layers-r/
+
+Apart from using the function to rotate the graphics, a package can also be used: https://github.com/marcosci/layer
+
+
+```{r}
+rotate_data <- function(data, x_add = 0, y_add = 0) {
+  
+  shear_matrix <- function(){ matrix(c(2, 1.2, 0, 1), 2, 2) }
+  
+  rotate_matrix <- function(x){ 
+    matrix(c(cos(x), sin(x), -sin(x), cos(x)), 2, 2) 
+  }
+  data %>% 
+    dplyr::mutate(
+      geometry = .$geometry * shear_matrix() * rotate_matrix(pi/20) + c(x_add, y_add)
+    )
+}
+
+rotate_data_geom <- function(data, x_add = 0, y_add = 0) {
+  shear_matrix <- function(){ matrix(c(2, 1.2, 0, 1), 2, 2) }
+  
+  rotate_matrix <- function(x) { 
+    matrix(c(cos(x), sin(x), -sin(x), cos(x)), 2, 2) 
+  }
+  data %>% 
+    dplyr::mutate(
+      geom = .$geom * shear_matrix() * rotate_matrix(pi/20) + c(x_add, y_add)
+    )
+}
+```
+
+```{r}
+### plot 
+
+# annotate parameters
+x = 68.43
+color = 'gray40'
+
+temp1 <- ggplot() +
+          
+        # terrain
+        geom_sf(data = dem1 %>% rotate_data(), aes(fill=elevation), color=NA) +
+        scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+        annotate("text", label='Elevation', x=x, y= 41.4, hjust = 0, color=color) +
+        labs(caption = "Data source: ONS, OSM, TfL. R package: elevatr.")
+
+temp2 <- temp1 +
+        
+        # pop
+        new_scale_fill() + 
+        new_scale_color() +
+        geom_sf(data = pop_brent %>% rotate_data(y_add = .15), aes(fill=population_density), color=NA) +
+        scale_fill_viridis_c(option = "inferno", direction = -1) +
+        annotate("text", label='Population density by LSOA (2021)', x=x, y= 41.55, hjust = 0, color=color) + 
+
+        # osm
+        new_scale_fill() + 
+        new_scale_color() +
+        geom_sf(data = roads1 %>% rotate_data(y_add = .3), aes(color=highway), size=.2) +
+        scale_colour_viridis_d(option = "viridis") +
+        annotate("text", label='Road hierarchy', x=x, y= 41.7, hjust = 0, color=color) +
+        
+        # cycle parking
+        new_scale_fill() + 
+        new_scale_color() +
+        geom_sf(data = cid_parking_brent %>% rotate_data(y_add = .45), aes(color=capacity), size = .5) +
+        scale_colour_viridis_d(option = "mako", begin = 0, end = 0.8, direction = -1) +
+        annotate("text", label='Cycle parking capacity', x=x, y= 41.85, hjust = 0, color=color)+
+      
+        theme_void()
+temp2
+        
+```
+
+```{r}
+ggsave(plot = temp2, filename = 'map_layers_brent.png', 
+       dpi=200, width = 15, height = 16, units='cm')
+```
+
+```{r}
+### plot  ----------------
+
+# annotate parameters
+x = 68.7
+color = 'gray40'
+
+temp3 <- ggplot() +
+          
+        # terrain
+        geom_sf(data = dem2 %>% rotate_data(), aes(fill=elevation), color=NA) +
+        scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+        annotate("text", label='Elevation', x=x, y= 41.2, hjust = 0, color=color) +
+        labs(caption = "Data source: ONS, OSM, TfL. R package: elevatr.")
+
+temp4 <- temp3 +
+        
+        # pop
+        new_scale_fill() + 
+        new_scale_color() +
+        geom_sf(data = pop_brom %>% rotate_data(y_add = .2), aes(fill=population_density), color=NA) +
+        scale_fill_viridis_c(option = "inferno", direction = -1) +
+        annotate("text", label='Population density by LSOA (2021)', x=x, y= 41.4, hjust = 0, color=color) + 
+
+        # osm
+        new_scale_fill() + 
+        new_scale_color() +
+        geom_sf(data = roads2 %>% rotate_data(y_add = .4), aes(color=highway), size=.2) +
+        scale_colour_viridis_d(option = "viridis") +
+        annotate("text", label='Road hierarchy', x=x, y= 41.6, hjust = 0, color=color) +
+        
+        # cycle parking
+        new_scale_fill() + 
+        new_scale_color() +
+        geom_sf(data = cid_parking_brom %>% rotate_data(y_add = .6), aes(color=capacity), size = .5) +
+        scale_colour_viridis_d(option = "mako", begin = 0, end = 0.8, direction = -1) +
+        annotate("text", label='Cycle parking capacity', x=x, y= 41.8, hjust = 0, color=color)+
+        theme_void()
+temp4
+   
+
+       
+```
+
+```{r}
+ggsave(plot = temp4, filename = 'map_layers_brom.png', 
+       dpi=200, width = 15, height = 16, units='cm')
+```
+

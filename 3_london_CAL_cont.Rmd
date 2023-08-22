@@ -3,7 +3,7 @@
 
 This file will first convert the measured access index to CAL using set frequency as PTAL and then analyse the CAL spatial distribution in relation to PTAL. 
 
-# load packages 
+## load packages 
 
 ```{r}
 library(sf)
@@ -14,6 +14,10 @@ library(grid)
 library(stringr)
 library(spdep)
 library(ggplot2)
+library(tidyr)
+library(patchwork)
+library(ggplot2)
+library(forcats)
 ```
 
 ## read in AI measured in previous file 
@@ -27,7 +31,7 @@ ttm$from_id <- ttm$from_id%>%
 summary(ttm)
 ```
 
-## merge ptal data 
+## merge ptal data with AI
 
 ```{r}
 origin_sf <- fread(file.path("input/origin.csv"))%>%
@@ -42,29 +46,54 @@ AI_and_PTAL <-ttm%>%
   st_as_sf(crs = 4326)
 ```
 
-## AI to CAL 
+## convert AI to CAL 
 
 It will first calculate the frequency of each band of PTAL and apply the same frequency to CAL band. 
 
 ```{r}
 valid <- AI_and_PTAL%>%
-  filter(AI2015 > 0)
+  filter(AI2015 > 0) 
+```
 
+```{r}
+# organise the data
+valid2 <- valid%>%
+  rename(AIpeak =AI, AIoffpeak = AI_off, AIPTAL = AI2015)%>%
+  pivot_longer(
+    cols = starts_with("AI"),
+    names_to = "name",
+    names_prefix = "AI",
+    values_to = "AI",
+    values_drop_na = TRUE
+  )
+
+# Most basic violin chart
+plot <- ggplot(valid2, aes(x=name, y=AI, fill=name, color=name)) + 
+  geom_violin()+
+  theme_ipsum() +
+  theme(legend.position="none")+
+  coord_flip() +
+      xlab("")
+
+plot
+
+ggsave("violin.png")
+```
+
+From the violin plot of CAL's AI at peak and offpeak and PTAL's AI, a positively skewed distribution is seen for all scenarios. Mode is smaller than mean and median. Most of the grids are of low AI with some extreme values. 
+
+Since the maximum AI of the three scenarios are very different, PTAL's AI maxi is 200 while CAL's AI maxi is 500 for off peak and 550 for peak time. The conversion of AI to CAL will be using the same frequency of AI as of PTAL, rather than the fixed AI range as PTAL. 
+
+```{r}
 count_all <- length(valid$PTAL2015)
 
 PTAL_summary <- AI_and_PTAL%>%
   group_by(PTAL2015)%>%
-  summarise(average_AI = mean(AI2015), count = n(), 
+  summarise(average_AI = mean(AI2015), 
+            count = n(), 
             pct = count/count_all)
-```
 
-```{r}
-hist(valid$AI)
-hist(valid$AI_off)
-hist(valid$AI2015)
 ```
-
-From the histograms of CAL's AI at peak and offpeak and PTAL's AI, a positively skewed distribution is seen for all scenarios. Mode is smaller than mean and median. Most of the grids are of low AI with some extreme values. 
 
 ### CAL conversion for peaktime values 
 
@@ -162,6 +191,57 @@ CAL_summary_off <- CAL_and_PTAL_off%>%
             pct = count/count_all_cal_off)
 ```
 
+```{r}
+PTAL_box <- 
+ggplot(AI_and_PTAL, aes(x = factor(PTAL2015), fill = factor(PTAL2015))) +
+    geom_bar(color="black")+
+  scale_fill_manual(values=c('white','#134480',"#1b71be","#3cb9e8", "#8dcc5b", "#ffeb3d", "#ffc08f", "#ff2e17","#8b1b16","black"))+
+      theme_ipsum() +
+        xlab("PTAL") + 
+    ylab("frequency") +
+  theme(legend.position="none") 
+
+CALpeak_box <- 
+ggplot(CAL_and_PTAL_peak, aes(x = factor(CAL), fill = factor(CAL))) +
+    geom_bar(color="black")+
+  scale_fill_manual(values=c('white','#134480',"#1b71be","#3cb9e8", "#8dcc5b", "#ffeb3d", "#ffc08f", "#ff2e17","#8b1b16","black"))+  
+  theme_ipsum() +
+        xlab("CAL(peak)") + 
+    ylab("frequency") +
+  theme(legend.position="none") 
+
+CALoffpeak_box <- 
+ggplot(CAL_and_PTAL_off, aes(x = factor(CAL_off), fill = factor(CAL_off))) +
+    geom_bar(color="black")+
+  scale_fill_manual(values=c('white','#134480',"#1b71be","#3cb9e8", "#8dcc5b", "#ffeb3d", "#ffc08f", "#ff2e17","#8b1b16","black"))+ 
+    theme_ipsum() +
+       xlab("CAL(offpeak)") + 
+    ylab("frequency") +
+  theme(legend.position="none") 
+
+```
+
+This figure combines the violin plot and box plots above with patchwork. 
+
+```{r}
+# One plot at the left and two at the right
+plot <- ggplot(valid2, aes(x=name, y=AI, fill=name, color=name)) + 
+  geom_violin()+
+  theme_ipsum() +
+  theme(legend.position="none")+
+  coord_flip() +
+      xlab("")
+
+plot + (PTAL_box / CALpeak_box / CALoffpeak_box)  +
+    plot_layout(ncol = 2,
+              widths = c(6, 4)) + 
+  plot_annotation(title = "Violin plot of AI and and bar plots of Accessibility Levels",
+             theme = theme(plot.title = element_text(hjust = 0.5), text = element_text(size = 20), axis.text = element_text(size = 16), legend.title = element_text(size = 20)))
+```
+
+```{r}
+ggsave("combine.png", height = 8, width = 12)
+```
 
 ## add grid polygon for mapping
 
@@ -188,7 +268,7 @@ CAL_and_PTAL_all <-grid%>%
   st_as_sf()
 ```
 
-### summarise the range of each band
+## summarise the range of each band
 
 ```{r}
 count_cal_off <- length(CAL_and_PTAL_all$CAL_off) - sum(is.na(CAL_and_PTAL_all$CAL_off))
@@ -208,6 +288,39 @@ CAL_band_peak <- CAL_and_PTAL_all%>%
 ```{r}
 st_write(CAL_band_peak, "cal_band_peak.csv")
 st_write(CAL_band_off, "cal_band_offpeak.csv")
+```
+Calculate the changes of CAL levels at peak and at off-peak. 
+
+```{r}
+CAL_and_PTAL_all <- CAL_and_PTAL_all%>%
+  mutate(CAL_num = case_when(CAL == "1a" ~ 1,
+                         CAL == "1b"~ 2,
+                         CAL == "2" ~ 3,
+                         CAL ==  "3" ~ 4,
+                         CAL ==  "4" ~ 5,
+                         CAL == "5" ~ 6,
+                         CAL ==  "6a" ~ 7,
+                         CAL == "6b" ~ 8,
+                        TRUE~ 0))%>%
+  mutate(CAL_num_off = case_when(CAL_off == "1a" ~ 1,
+                         CAL_off == "1b"~ 2,
+                         CAL_off == "2" ~ 3,
+                         CAL_off ==  "3" ~ 4,
+                         CAL_off ==  "4" ~ 5,
+                         CAL_off == "5" ~ 6,
+                         CAL_off ==  "6a" ~ 7,
+                         CAL_off == "6b" ~ 8,
+                        TRUE~ 0))%>%
+  mutate(diff = case_when(CAL != 0 & CAL_off != 0 ~ CAL_num - CAL_num_off,
+                          TRUE ~ NA))
+```
+
+```{r}
+CAL_and_PTAL_diff <- CAL_and_PTAL_all%>%
+  filter(diff != 0)
+
+CAL_and_PTAL_diff$diff <- CAL_and_PTAL_diff$diff %>%
+  as.numeric()
 ```
 
 ## map the output
@@ -301,56 +414,32 @@ tmap_save(map_AI_ptal, 'london_ai_ptal.png')
 
 The above map shows the Access Index values, before converted into the CAL bands. Extremely high values tend to concentrate in inner London...Unlike PTAL's AI exhibiting clusters of low values (coldspots) in central locations, CAL's AI is generally smoothly transitioning to low values from inner to outer London locations with limited coldspots within the centre. 
 
-```{r}
-hist(CAL_and_PTAL_all$AI)
-```
-
-```{r}
-ggplot(data = CAL_and_PTAL_all, aes(x = CAL, fill=CAL)) +
-    geom_bar(color="black")+
-  theme_minimal()+
-  theme(legend.position="none")+
-  scale_fill_manual(values=c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154","black"))+
-  ylim(0,45000)
-
-ggplot(data = CAL_and_PTAL_all, aes(x = CAL_off, fill=CAL_off)) +
-    geom_bar(color="black")+
-  theme_minimal()+
-    theme(legend.position="none")+
-  scale_fill_manual(values=c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154","black"))+
-  ylim(0,45000)
-
-ggplot(data = CAL_and_PTAL_all, aes(x = PTAL2015, fill=PTAL2015)) +
-    geom_bar(color="black")+
-  theme_minimal()+
-    theme(legend.position="none")+
-  scale_fill_manual(values=c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154","black"))+
-  ylim(0,45000)
-```
 
 
 ```{r}
-COLOR = c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154")
-# this is just the Viridis colour code from https://waldyrious.net/viridis-palette-generator/ with white as the initial colour for NA/0 values
+COLOR = c('white','#134480',"#1b71be","#3cb9e8", "#8dcc5b", "#ffeb3d", "#ffc08f", "#ff2e17","#8b1b16")
+# same color palette as PTAL
 Labels = c('0: missing values', '1a: least accessible','1b','2','3','4','5','6a','6b: most accessible')
 
 tmap_mode("plot")
 
 map_cal =
   tm_shape(CAL_and_PTAL_all) +
-  tm_polygons(col = "CAL",palette=COLOR,
-          showNA = FALSE,
-          colorNA = 'white',
-          title = "CAL",
-          border.alpha = 0,
-          labels= Labels) +
+  tm_polygons(col = "CAL",
+              palette=COLOR,
+              showNA = FALSE,
+              colorNA = 'white',
+              title = "CAL",
+              border.alpha = 0,
+              labels= Labels
+              ) +
 tm_shape(london) +
   tm_polygons(col = NA, 
               alpha = 0)+ 
 tm_layout(bg.color = NA, 
           legend.show = FALSE, 
           main.title="A) Cycle Access Level (peak time)",
-          main.title.size = 1,
+          main.title.size = .8,
           frame = FALSE)
 
 map_cal
@@ -358,38 +447,40 @@ map_cal
 
 map_cal_off =
   tm_shape(CAL_and_PTAL_all) +
-  tm_polygons(col = "CAL_off",palette=COLOR,
-          showNA = FALSE,
-          colorNA = 'white',
-          title = "CAL",
-          border.alpha = 0,
-          labels= Labels) +
+  tm_polygons(col = "CAL_off",
+              palette=COLOR,
+              showNA = FALSE,
+              colorNA = 'white',
+              title = "CAL",
+              border.alpha = 0,
+              labels= Labels) +
 tm_shape(london) +
   tm_polygons(col = NA, 
               alpha = 0)+ 
 tm_layout(bg.color = NA, 
           legend.show = FALSE, 
           main.title="B) Cycle Access Level (off-peak time)",
-          main.title.size = 1,
+          main.title.size = .8,
           frame = FALSE)
 
 map_cal_off
 
 map_ptal =
   tm_shape(CAL_and_PTAL_all) +
-  tm_polygons(col = "PTAL2015",palette=COLOR,
-          showNA = FALSE,
-          colorNA = 'white',
-          title = "PTAL",
-          border.alpha = 0,
-          labels= Labels) +
+  tm_polygons(col = "PTAL2015",
+              palette=COLOR,
+              showNA = FALSE,
+              colorNA = 'white',
+              title = "PTAL",
+              border.alpha = 0,
+              labels= Labels) +
 tm_shape(london) +
   tm_polygons(col = NA, 
               alpha = 0)+ 
 tm_layout(bg.color = NA, 
           legend.show = FALSE, 
           main.title="D) Public Transport Access Level",
-          main.title.size = 1,
+          main.title.size = .8,
           frame = FALSE)
 
 map_ptal
@@ -398,52 +489,14 @@ legend =
    tm_shape(CAL_and_PTAL_all) +
     tm_polygons("PTAL2015",
                 palette=COLOR,
+                showNA = FALSE,
                 labels= Labels,
                 title = "CAL and PTAL") +
     tm_layout(legend.only = TRUE, legend.position=c(0.2,0),asp=0.1)
 
 legend
-```
-
-```{r}
-CAL_and_PTAL_all <- CAL_and_PTAL_all%>%
-  mutate(CAL_num = case_when(CAL == "1a" ~ 1,
-                         CAL == "1b"~ 2,
-                         CAL == "2" ~ 3,
-                         CAL ==  "3" ~ 4,
-                         CAL ==  "4" ~ 5,
-                         CAL == "5" ~ 6,
-                         CAL ==  "6a" ~ 7,
-                         CAL == "6b" ~ 8,
-                        TRUE~ 0))%>%
-  mutate(CAL_num_off = case_when(CAL_off == "1a" ~ 1,
-                         CAL_off == "1b"~ 2,
-                         CAL_off == "2" ~ 3,
-                         CAL_off ==  "3" ~ 4,
-                         CAL_off ==  "4" ~ 5,
-                         CAL_off == "5" ~ 6,
-                         CAL_off ==  "6a" ~ 7,
-                         CAL_off == "6b" ~ 8,
-                        TRUE~ 0))%>%
-  mutate(diff = case_when(CAL != 0 & CAL_off != 0 ~ CAL_num - CAL_num_off,
-                          TRUE ~ NA))
-```
-
-```{r}
-hist(CAL_and_PTAL_all$diff)
-```
 
 
-```{r}
-CAL_and_PTAL_diff <- CAL_and_PTAL_all%>%
-  filter(diff != 0)
-
-CAL_and_PTAL_diff$diff <- CAL_and_PTAL_diff$diff %>%
-  as.numeric()
-```
-
-
-```{r}
 map_diff =
   tm_shape(CAL_and_PTAL_diff) +
   tm_polygons(col = "diff",palette="RdBu", 
@@ -460,7 +513,7 @@ tm_layout(bg.color = NA,
           frame = FALSE,
           legend.show = FALSE, 
           main.title="C) Peak and off-peak difference in CAL",
-          main.title.size = 1)
+          main.title.size = .8)
 
 map_diff
 
@@ -470,6 +523,7 @@ legend_diff =
     tm_polygons("diff",
                 palette="RdBu",
                 midpoint = 0,
+                showNA = FALSE,
                 title = "Difference in CAL") +
     tm_scale_bar(breaks = c(0, 2, 4),position=c(0.3,0.04), text.size=0.6)+
     tm_compass(north=0, position=c(0.2,0.1))+
@@ -511,7 +565,7 @@ st_write(new, "london_cal.gpkg", driver = "GPKG",layer_options = "OVERWRITE=true
 
 # Spatial autocorrelation 
 
-Areas with high accessibility can be also influential to their surrounding locations. People living in the grid close to high AI values can also enjoy the good proximity and accessibility through sustainable transport. Hence, spatial autocorrelation of the CAL or AI values will be assessed to see if there is any cluster of such places that could be the ideal locations for cycle infrastructure investment and new housing development projects.  
+Areas with high accessibility can be also influential to their surrounding locations. People living in the grid close to high AI values can also enjoy the good proximity and accessibility through sustainable transport. Hence, spatial autocorrelation of the AI values will be assessed to see if there is any cluster of such places that could be the ideal locations for cycle infrastructure investment and new housing development projects.  
 
 ## Moran's I
 
@@ -563,6 +617,7 @@ Local spatial autocorrelation
 ```{r}
 moran <- moran.plot(new_27700$AI, listw = nb2listw(nb, style = "W", zero.policy = TRUE), zero.policy = TRUE, na.action= na.omit)
 ```
+
 - Compute local Moran
 
 ```{r}
@@ -581,7 +636,6 @@ tm_shape(moran.map) +
              legend.hist.size = 1,
              legend.hist.width = 0.75)
 ```
-
 
 - Plot LISA clusters
 
@@ -658,7 +712,6 @@ map_cluster
 
 This output shows that inner London as a large cluster generally has high CAL surrounded by also high CAL. Outer London on the other hand has lower CAL and surrounded by low CAL grids. Good local connectivity is concentrated in central locations while outer boroughs obtain poorer local connectivity.Those areas are more likely to be car dependent as the local connectivity through walking, cycling and public transit is poor. The middle ring between inner and outer London clusters shows not significant result. A mixture of high and low CAL is present in this ring, implying high potential for planners to direct less infrastructure into the areas to gain higher return in improving local connectivity. 
 
-
 ```{r}
 tmap_save(map_cluster, 'LISA_cluster.png')
 ```
@@ -667,24 +720,52 @@ tmap_save(map_cluster, 'LISA_cluster.png')
 
 Average CAL will then be measured per borough to identify case study area in this project. And compare between the inner and outer london boroughs. 
 
-Add borough info to each grid. 
+Add borough and lsoa info to each grid. 
 
 ```{r}
-CAL_and_PTAL_borough_grid <-  st_join(CAL_and_PTAL_all, london)
+CAL_and_PTAL_all <- st_read(here::here("london_cal.gpkg"))
+
+
+lsoa <- st_read(here::here("data/lsoa_geo_shp/LSOA_2011_London_gen_MHW.shp"))%>%
+  st_transform(.,4326)%>%
+  dplyr::select("LSOA11CD","LSOA11NM","LAD11CD","LAD11NM", "geometry")
+
+lsoa22 <- read.csv(here::here("data/lsoa11to22.csv"),sep = ",",  header = TRUE, 
+                         encoding = "latin1")%>%
+  filter(LSOA11CD != LSOA21CD)%>%
+  dplyr::select("LSOA11CD", "LSOA21CD")
+
+lsoa_new <- lsoa%>%
+  left_join(., lsoa22, by = join_by("LSOA11CD" == "LSOA11CD"))%>%
+  mutate(code = case_when(!is.na(LSOA21CD) ~ LSOA21CD,
+                          TRUE~ LSOA11CD))%>%
+  select("code", "LSOA11NM", "LAD11NM", "geometry")
+
+lsoa_new <- lsoa_new%>%
+  unique()
+
+sf_use_s2(FALSE)
+
+CAL_and_PTAL_lsoa_grid <-  st_join(lsoa_new, CAL_and_PTAL_all)
 ```
 
 ```{r}
-CAL_and_PTAL_borough_grid <- CAL_and_PTAL_borough_grid%>%
+qtm(lsoa_new)
+```
+
+```{r}
+CAL_and_PTAL_lsoa_grid <- CAL_and_PTAL_lsoa_grid%>%
   unique()
 ```
 
-```{r}
-CAL_and_PTAL_borough <- CAL_and_PTAL_borough_grid %>%
-  mutate(AI_mean = (AI+AI_off)/2)%>%
-  group_by(name)%>%
-  summarize(average_AI=mean(AI_mean,na.rm=TRUE), inner_outer=first(inner_outer))
-```
+- calculate average AI of each lsoa 
 
+```{r}
+CAL_and_PTAL_lsoa <- CAL_and_PTAL_lsoa_grid %>%
+  mutate(AI_mean = (AI+AI_off)/2)%>%
+  group_by(code)%>%
+  summarize(average_AI=mean(AI_mean,na.rm=TRUE))
+```
 ```{r}
 brent <- london%>%
   filter(name == "Brent")
@@ -695,7 +776,7 @@ brom <- london%>%
 ```{r}
 tmap_mode("plot")
 
-map_mean_ai = tm_shape(CAL_and_PTAL_borough) +
+map_mean_ai = tm_shape(CAL_and_PTAL_lsoa) +
   tm_fill(col="average_AI",
           palette="-viridis",
           title = "average AI",
@@ -707,12 +788,12 @@ tm_shape(brent) +
   tm_polygons(col = NA, 
               border.col = "red",
               alpha = 0)+ 
-  tm_text( "name")+
+  tm_text("name")+
 tm_shape(brom) +
   tm_polygons(col = NA, 
               border.col = "red",
               alpha = 0)+ 
-  tm_text( "name")+
+  tm_text("name")+
   tm_layout(bg.color = NA, 
             legend.position = c(.85,0.05),
             main.title="Average Access Index map",
@@ -726,35 +807,62 @@ tm_shape(brom) +
 map_mean_ai
 ```
 ```{r}
-tmap_save(map_mean_ai, 'mean_ai_borough.png')
+tmap_save(map_mean_ai, 'mean_ai_lsoa.png')
 ```
 
+- add inner outer borough character for each lsoa 
+
 ```{r}
-mean_ai_inner_outer <- CAL_and_PTAL_borough %>%
+CAL_and_PTAL_lsoa<-CAL_and_PTAL_lsoa%>%
+  left_join(., st_drop_geometry(lsoa_new), by = join_by('code'=='code'))
+
+innerouter <- london%>%
+  select("name","inner_outer")
+
+CAL_and_PTAL_lsoa<-CAL_and_PTAL_lsoa%>%
+  left_join(., st_drop_geometry(innerouter), by = join_by('LAD11NM'=='name'))
+
+CAL_and_PTAL_lsoa<-CAL_and_PTAL_lsoa%>%
+  unique()
+
+```
+
+- average AI by inner outer
+
+```{r}
+mean_ai_inner_outer <- CAL_and_PTAL_lsoa %>%
   group_by(inner_outer) %>%
   summarise(mean=mean(average_AI, na.rm=TRUE))
 
 mean_ai_inner_outer
 ```
-
 ```{r}
-library(ggplot2)
-library(forcats)
-
-bar <- ggplot(CAL_and_PTAL_borough, aes(x = fct_reorder(name, desc(average_AI)), y = average_AI, fill = inner_outer)) + 
-   geom_bar(stat = "identity") + 
-   labs(title = "Average AI in London boroughs by inner and outer boroughs",
-        x = "Borough name", y = "Mean AI") +
-    theme_classic()+
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +          # Rotate axis labels
-    coord_fixed(1/30)
-bar
+summary(CAL_and_PTAL_lsoa)
 ```
+- box plot by inner outer and by borough 
 
 ```{r}
-png("bar_inner_outer.png")
-print(bar)
-dev.off()
+library(viridis)
+
+box =
+CAL_and_PTAL_lsoa %>%
+  ggplot(aes(x=average_AI, y=reorder(LAD11NM, average_AI, FUN=mean),fill=inner_outer)) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, begin=0.4, end=0.9, alpha=0.9,option="D") +
+    theme_minimal() +
+    theme(legend.position = "bottom", 
+      plot.title = element_text(size=11)
+    ) +
+    ggtitle("Average AI per LSOA by borough") +
+    xlab("Average AI")+
+    ylab("")+
+    labs(fill = "")
+
+
+box
+```
+```{r}
+ggsave("box_borough_lsoa.png", width= 10, height = 7, dpi = 600)
 ```
 
 # Objective 3: identify areas of potential using data from PTAL and CAL 
@@ -762,6 +870,8 @@ dev.off()
 This section will compare CAL and PTAL for the two case study boroughs through the bivariate choropleth maps to assess area of potential. 
 
 ```{r}
+CAL_and_PTAL_borough_grid <-  st_join(CAL_and_PTAL_all, london)
+
 CAL_and_PTAL_brent <- CAL_and_PTAL_borough_grid%>%
   filter(name == "Brent")
 CAL_and_PTAL_brom <- CAL_and_PTAL_borough_grid%>%
@@ -771,8 +881,8 @@ CAL_and_PTAL_brom <- CAL_and_PTAL_borough_grid%>%
 ## plot the CAL and PTAL of both boroughs
 
 ```{r}
-COLOR = c('white','#fde725',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154")
-COLORcal = c('white',"#a0da39","#4ac16d", "#1fa187", "#277f8e", "#365c8d", "#46327e","#440154")
+COLOR = c('white','#134480',"#1b71be","#3cb9e8", "#8dcc5b", "#ffeb3d", "#ffc08f", "#ff2e17","#8b1b16")
+COLORcal = c('white',"#1b71be","#3cb9e8", "#8dcc5b", "#ffeb3d", "#ffc08f", "#ff2e17","#8b1b16")
 
 tmap_mode("plot")
 
@@ -908,45 +1018,311 @@ bi_cho_data <- function (input) {
   # specify data columns for mapping 
   data <- bi_class(input2, x = cal_num, y = ptal_num, style = "quantile", dim = 3)
 
-  # create map
-  map <- ggplot() +
-  geom_sf(data = data, mapping = aes(fill = bi_class), color = NA, size = 0.1, show.legend = FALSE) +
-    bi_scale_fill(pal = "GrPink", dim = 3) +
-    labs(title = "Bivariate choropleth map (CAL and PTAL)") +
-    bi_theme()+
-    theme(plot.title = element_text(size=8))
+
   
-  # legend
-  legend <- bi_legend(pal = "GrPink",
-                    dim = 3,
-                    xlab = "Higher CAL",
-                    ylab = "Higher PTAL",
-                    size = 4)
-  
-  # layout
-  finalPlot <- ggdraw() +
-    draw_plot(map, 0, 0, 1, 1) +
-    draw_plot(legend, .74, .74, .2, .2)
-  
-  return(finalPlot)
+  return(data)
 }
 ```
 
 
 ```{r}
-bi_cho_data(CAL_and_PTAL_brent)  
+data_brent = bi_cho_data(CAL_and_PTAL_brent)  
+```
+```{r}
+#add context (location in london)
+
+st_crs(london) == st_crs(4326)
+
+london_map <- ggplot()+
+  geom_sf(data = london, fill='white', color = gray(.5))+ 
+  theme_bw()+
+  theme(panel.grid.major = element_line(color = gray(0.25), 
+                                            linetype = "dashed", 
+                                            linewidth = 0))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  geom_sf(data = brent,aes(fill = 'red'), show.legend = FALSE)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA)
+    ) 
+
+london_map
 ```
 
 ```{r}
-ggsave("bi_cho_brent.png", width = 13, height = 13, units = "cm")
+#add context (key locations) + bi cho map
+
+towncentres <- st_read(here::here("data/CentresPROJECTED.gpkg"))%>%
+  select("objectid","borough","classification")%>%
+  st_transform(4326)%>%
+  filter(borough == "Brent" | borough == "Bromley")
+
+tc_brent <- towncentres%>%
+  filter(borough == "Brent")
+
+tc_cen_brent <- towncentres_cen%>%
+  st_join(., tc_brent)%>%
+  filter(borough == "Brent")%>%
+  select("id", "borough","classification","geometry")
+
+# give classifcation of town centre a shape
+tc_shape <- c('International'= 8, 'Metropolitan' = 21, 'Major' = 17, 'District' = 18,'Neighbourhood' = 20)
+tc_col <- c('International'= "yellow", 'Metropolitan' = "yellow", 'Major' = "deeppink", 'District' = "darkgoldenrod1",'Neighbourhood' = "deepskyblue3")
+
+
+# name of key town centres
+tc_name <- tibble(name = c("Wembley", "Harlesden", "Old Oak Common", "Kilburn","Willesden", "Wembley Park","Preston Road"), Y = c(51.565, 51.525,51.526, 51.526, 51.560, 51.570, 51.575), X = c(-0.20, -0.22, -0.252, -0.19218331651448564, -0.198, -0.208, -0.217))
+
+    
+    
+data_brent <- data_brent %>%st_transform(., 4326)
+
+brent <- brent %>%st_transform(., 4326)
+
+tc_cen_brent<- tc_cen_brent %>%st_transform(., 4326)
+
+# create map
+map <- ggplot() +
+  coord_cartesian(xlim =c(-0.5, -0.10), ylim = c(51, 52)) +
+  geom_sf(data = data_brent, mapping = aes(fill = bi_class), color = NA, size = 0.1, show.legend = FALSE) +
+    bi_scale_fill(pal = "GrPink", dim = 3) +
+    labs(title = "Bivariate choropleth map (CAL and PTAL)") +
+    bi_theme()+
+    theme(plot.title = element_text(size=8)) +
+   geom_sf(data = brent, fill=alpha("white",0.2), color = 'black', lwd = .3, show.legend = FALSE)+ 
+  geom_sf(data = tc_cen_brent, aes(shape = classification, col=classification), size =2, show.legend = FALSE)+
+    scale_shape_manual(values=tc_shape)+
+    scale_color_manual(values=tc_col)+
+  draw_line(y = c(51.554721629396575, 51.565),
+    x = c(-0.2860747704442487,-0.20),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.53603, 51.525),
+    x = c(-0.2467083,-0.22),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.54741, 51.560),
+    x = c(-0.2269566,-0.198),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.56154, 51.570),
+    x = c(-0.2801694,-0.208),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.57188344664582,51.575),
+    x = c(-0.29492742493101903,-0.217),
+    color = "midnightblue", size = .5, linetype=2)+
+  geom_label(data = tc_name, aes(X, Y, label = name), size = 2.5, show.legend = FALSE)+
+   theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA)
+    ) 
+
+map 
+
+# legend
+legend <- bi_legend(pal = "GrPink",
+                    dim = 3,
+                    xlab = "Higher CAL",
+                    ylab = "Higher PTAL",
+                    size = 4) +
+   theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA)
+    ) 
+```
+
+
+```{r}
+# layout
+finalPlot <- ggdraw() +
+  draw_plot(map, 0.1, 0, 1, 1) +
+  draw_plot(legend, .8, .65, .2, .2) +
+  draw_plot(london_map, .8, .8, .2, .2) +
+  theme(legend.box.margin = margin(0, 0, 0, 12))+
+  theme(legend.key=element_rect(fill="white"))
+
+finalPlot
+```
+
+
+
+```{r}
+#add context (MCDA in previous file)
+
 ```
 
 ```{r}
-bi_cho_data(CAL_and_PTAL_brom)
+ggsave("bi_cho_brent.png", width = 16, height = 10, units = "cm")
+```
+
+# same for Bromley
+
+```{r}
+data_brom = bi_cho_data(CAL_and_PTAL_brom)  
 ```
 
 ```{r}
-ggsave("bi_cho_brom.png",width = 13, height = 13, units = "cm")
+#add context (location in london)
+
+london_map_brom <- ggplot()+
+  geom_sf(data = london, fill='white', color = gray(.5))+ 
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  geom_sf(data = brom,aes(fill = 'red'), show.legend = FALSE)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA)
+    ) 
+
+london_map_brom
+```
+
+```{r}
+#add context (key locations) + bi cho map
+
+tc_brom <- towncentres%>%
+  filter(borough == "Bromley")
+
+tc_cen_brom <- towncentres_cen%>%
+  st_join(., tc_brom)%>%
+  filter(borough == "Bromley")%>%
+  select("id", "borough","classification","geometry")
+
+# name of key town centres
+tc_name <- tibble(name = c("Bromley", "Orpington", "Beckenham", "Penge","Petts Wood", "West Wickham"), Y = c(51.45, 51.45,51.44, 51.45, 51.44, 51.37628), X = c(0.01577909, 0.1001473, -0.0244727, -0.05272902, 0.07553703, -0.06))
+
+    
+    
+data_brom <- data_brom %>%st_transform(., 4326)
+
+brom <- brom %>%st_transform(., 4326)
+
+tc_cen_brom<- tc_cen_brom %>%st_transform(., 4326)
+
+# create map
+map_brom <- ggplot() +
+  coord_cartesian() +
+  geom_sf(data = data_brom, mapping = aes(fill = bi_class), color = NA, size = 0.1, show.legend = FALSE) +
+    bi_scale_fill(pal = "GrPink", dim = 3) +
+    labs(title = "Bivariate choropleth map (CAL and PTAL)") +
+    bi_theme()+
+    theme(plot.title = element_text(size=8)) +
+   geom_sf(data = brom, fill=alpha("white",0.2), color = 'black', lwd = .3, show.legend = FALSE)+ 
+  geom_sf(data = tc_cen_brom, aes(shape = classification, col=classification), size =2, show.legend = FALSE)+
+    scale_shape_manual(values=tc_shape)+
+    scale_color_manual(values=tc_col) +
+  draw_line(y = c(51.40445, 51.45),
+    x = c(0.01577909,0.01577909),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.37616, 51.45),
+    x = c(0.1001473,0.1001473),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.40876, 51.44),
+    x = c(-0.0244727,-0.0244727),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.41424, 51.45),
+    x = c(-0.05272902,-0.05272902),
+    color = "midnightblue", size = .5, linetype=2)+
+  draw_line(y = c(51.38897,51.44),
+    x = c(0.07553703,0.07553703),
+    color = "midnightblue", size = .5, linetype=2)+
+   draw_line(y = c(51.37628,51.37628),
+    x = c(-0.01670207,-0.06),
+    color = "midnightblue", size = .5, linetype=2)+
+  geom_label(data = tc_name, aes(X, Y, label = name), size = 2.5, show.legend = FALSE)+
+   theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA)
+    ) 
+
+map_brom
+
+
+# legend
+legend_brom <- bi_legend(pal = "GrPink",
+                    dim = 3,
+                    xlab = "Higher CAL",
+                    ylab = "Higher PTAL",
+                    size = 4) +
+   theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA)
+    ) 
+```
+
+
+```{r}
+# layout
+finalPlot_brom <- ggdraw() +
+  draw_plot(map_brom, 0.1, 0, 1, 1) +
+  draw_plot(legend_brom, .8, .65, .2, .2) +
+  draw_plot(london_map_brom, .8, .8, .2, .2) +
+  theme(legend.box.margin = margin(0, 0, 0, 12))+
+  theme(legend.key=element_rect(fill="white"))
+
+finalPlot_brom
+```
+
+```{r}
+ggsave("bi_cho_brom.png",width = 16, height = 10, units = "cm")
+```
+
+```{r}
+tc_class = ggplot()+
+    geom_sf(data = tc_cen_brom, aes(shape = classification, col=classification), size =2)+
+ scale_shape_manual(values=tc_shape)+
+    scale_color_manual(values=tc_col)+
+  theme_dark()
+
+legend_tc_class <- get_legend(tc_class)
+
+legend_tc_class
+
+grid.newpage()                              
+
+grid.draw(legend_tc_class)
+
+ggsave("tc_legend.png",width = 5, height = 10, units = "cm")
+
 ```
 
 
