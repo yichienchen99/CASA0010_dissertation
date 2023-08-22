@@ -11,6 +11,7 @@ To reproduce the study, run the files in order (The produced datasets that will 
 1. 1_data_processing.Rmd (collect and clean the data inputs)
 2. 2_london_CAL.Rmd (estimate travel time using r5r engine and compute access index)
 3. 3_london_CAL_cont.Rmd (convert access index into Cycle Access Level and analyse the spatial patterns of CAL and PTAL)
+4. 4_MCDA.Rmd (visualise some contexts for the CAL outcomes, including elevation, population density, road network and cycle parking capacity)
 
 The above files can already produce the dissertation outputs. The following files give additional information on some sections that could be run optionally. 
 
