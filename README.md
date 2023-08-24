@@ -4,7 +4,7 @@
 
 This repository documents the data processing and analysis for CASA0010 Dissertation, which set out to answer the following research question:
 
-*How can cycle accessibility in London be measured spatially?*
+*How can accessibility to town centres via sustainable modes be measured in London?*
 
 To reproduce the study, run the files in order (The produced datasets that will be used in other files are saved as CSV so it is recommended to clean the R environment to save memory): 
 
